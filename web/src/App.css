@@ -273,4 +273,31 @@ body {
     justify-self: start;
   }
 }
+/* ===== Mobile readability / contrast fix ===== */
+@media (max-width: 768px) {
+  body {
+    background: #0b1220 !important;
+    color: rgba(255,255,255,0.92) !important;
+  }
+
+  .games {
+    gap: 10px !important;
+  }
+
+  .game-card {
+    background: rgba(255,255,255,0.08) !important;
+    border: 1px solid rgba(255,255,255,0.14) !important;
+    color: rgba(255,255,255,0.92) !important;
+  }
+
+  .game-card .sub {
+    color: rgba(255,255,255,0.65) !important;
+  }
+
+  .circle {
+    background: rgba(56,189,248,0.18) !important;
+    border: 1px solid rgba(255,255,255,0.14) !important;
+    color: rgba(255,255,255,0.75) !important;
+  }
+}
 
