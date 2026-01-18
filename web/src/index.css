@@ -1,6 +1,5 @@
-/* web/src/index.css */
+/* web/src/index.css — clean, dark, no Vite leftovers */
 
-/* Force dark baseline everywhere */
 :root {
   color-scheme: dark;
   background-color: #0b1220;
@@ -15,5 +14,10 @@ html, body {
   color: rgba(255,255,255,0.92);
 }
 
-a { color: inherit; }
+#root {
+  min-height: 100vh;
+}
+
+a { color: inherit; text-decoration: none; }
 button, input { font: inherit; }
+
