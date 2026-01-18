@@ -300,4 +300,28 @@ body {
     color: rgba(255,255,255,0.75) !important;
   }
 }
+/* ===== FORCE DARK THEME (wins over index.css + iOS light mode) ===== */
+:root { color-scheme: dark !important; }
+
+html, body, #root {
+  background: #0b1220 !important;
+  color: rgba(255,255,255,0.92) !important;
+}
+
+#root {
+  min-height: 100vh !important;
+}
+
+.game-card {
+  background: rgba(0,0,0,0.35) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+}
+
+.game-card .teams {
+  color: rgba(255,255,255,0.95) !important;
+}
+
+.game-card .sub {
+  color: rgba(255,255,255,0.70) !important;
+}
 
