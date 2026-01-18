@@ -1,10 +1,194 @@
+/* =========================
+   Base / Reset-ish
+========================= */
+:root {
+  --bg: #0b1220;
+  --panel: rgba(255, 255, 255, 0.06);
+  --panel-2: rgba(255, 255, 255, 0.10);
+  --border: rgba(255, 255, 255, 0.12);
+  --text: rgba(255, 255, 255, 0.92);
+  --muted: rgba(255, 255, 255, 0.65);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(1200px 600px at 20% 0%, rgba(99, 102, 241, 0.25), transparent 60%),
+              radial-gradient(900px 600px at 80% 0%, rgba(34, 197, 94, 0.18), transparent 55%),
+              var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+/* =========================
+   Root container
+========================= */
 #root {
   max-width: 1280px;
   margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+  padding: 24px;
 }
 
+/* =========================
+   Header
+   (expects: .header, h1)
+========================= */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: 0.2px;
+}
+
+.header .status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.header .pill {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 999px;
+}
+
+/* =========================
+   Layout
+   (expects: .layout, .left-column, .center-column, .right-column)
+========================= */
+.layout {
+  display: grid;
+  grid-template-columns: 260px 1fr 260px;
+  gap: 16px;
+  align-items: start;
+}
+
+/* Side columns (if you have them) */
+.left-column,
+.right-column {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 16px;
+  min-height: 520px;
+}
+
+/* Center column */
+.center-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* =========================
+   Search
+   (expects: .search)
+========================= */
+.search {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 16px;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.25);
+  color: var(--text);
+  outline: none;
+}
+
+.search input::placeholder {
+  color: rgba(255,255,255,0.45);
+}
+
+.search button {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.12);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.search button:hover {
+  background: rgba(255,255,255,0.18);
+}
+
+/* =========================
+   Game list + cards
+   (expects: .games, .game-card, .circle)
+========================= */
+.games {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.game-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.05));
+  border-radius: 16px;
+}
+
+.game-card .meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.game-card .teams {
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.game-card .sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.circle {
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(56, 189, 248, 0.18);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* =========================
+   Vite demo leftovers (safe to keep)
+========================= */
 .logo {
   height: 6em;
   padding: 1.5em;
@@ -19,12 +203,8 @@
 }
 
 @keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -40,3 +220,57 @@
 .read-the-docs {
   color: #888;
 }
+
+/* =========================
+   Mobile fixes
+========================= */
+@media (max-width: 768px) {
+  #root {
+    max-width: 100%;
+    padding: 12px;
+  }
+
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .header h1 {
+    font-size: 18px;
+  }
+
+  .layout {
+    display: block;
+  }
+
+  .left-column,
+  .right-column {
+    display: none;
+  }
+
+  .search {
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .search input {
+    padding: 10px 10px;
+  }
+
+  .search button {
+    padding: 10px 12px;
+  }
+
+  .game-card {
+    grid-template-columns: 1fr;
+    padding: 10px;
+  }
+
+  .circle {
+    width: 48px;
+    height: 48px;
+    justify-self: start;
+  }
+}
+

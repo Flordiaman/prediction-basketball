@@ -125,6 +125,8 @@ export default function App() {
   const [err, setErr] = useState("");
   const [teamQuery, setTeamQuery] = useState("");
   const [liveGames, setLiveGames] = useState([]);
+  const isMobile = window.innerWidth < 768;
+
 
 
 useEffect(() => {
@@ -196,9 +198,11 @@ useEffect(() => {
 
   return (
     <div style={{ fontFamily: "system-ui", background: "#f6f7fb", minHeight: "100vh" }}>
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: 24 }}>
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: isMobile ? 12 : 24 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 16 }}>
-          <h1 style={{ margin: 0, fontSize: 40, letterSpacing: -0.5 }}>Basketball App</h1>
+          <h1 style={{ margin: 0, fontSize: isMobile ? 26 : 40, letterSpacing: -0.5 }}>
+            Basketball App
+      </h1>
           {health && (
             <span style={{ fontSize: 14, opacity: 0.75 }}>
               API connected ✅ <Badge>{health.serverTime}</Badge>
@@ -281,13 +285,14 @@ useEffect(() => {
 <div style={{ height: 12 }} />
 
         <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1.2fr 1fr",
-            gap: 16,
-            alignItems: "start",
-          }}
-        >
+              style={{
+                display: "grid",
+                gridTemplateColumns: isMobile ? "1fr" : "1fr 1.2fr 1fr",
+                gap: 16,
+                alignItems: "start",
+              }}
+>
+
           <Card title={`East (${east.length})`}>
             <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
               {east.map((t) => (
