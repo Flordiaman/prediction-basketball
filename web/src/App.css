@@ -324,4 +324,5 @@ html, body, #root {
 .game-card .sub {
   color: rgba(255,255,255,0.70) !important;
 }
+.game-card { outline: 4px solid hotpink !important; }
 
