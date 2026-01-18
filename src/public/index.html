@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>NBA Market Tracker</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">🏀</div>
+      <div>
+        <div class="title">Prediction Market Tracker</div>
+        <div class="subtitle">Polymarket NBA • Collector + History</div>
+      </div>
+    </div>
+
+    <div class="top-actions">
+      <button id="btnRefresh" class="btn">Refresh</button>
+      <span id="pillCollector" class="pill">Collector: unknown</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- LEFT: Collector control + markets list -->
+    <section class="panel left">
+      <div class="card">
+        <div class="card-title">Collector</div>
+
+        <div class="grid2">
+          <label>
+            Poll interval (sec)
+            <input id="collectorEverySec" type="number" min="3" max="120" value="10"/>
+          </label>
+
+          <label>
+            Limit (markets list)
+            <input id="marketsLimit" type="number" min="25" max="1000" value="200"/>
+          </label>
+        </div>
+
+        <label>
+          Add slugs (comma or newline)
+          <textarea id="collectorSlugs" rows="3" placeholder="nba-was-den-2026-01-17&#10;nba-cha-gsw-2026-01-17"></textarea>
+        </label>
+
+        <div class="row">
+          <button id="btnCollectorStart" class="btn primary">Start / Update</button>
+          <button id="btnCollectorStop" class="btn danger">Stop</button>
+        </div>
+
+        <div class="muted small" id="collectorMeta"></div>
+        <div class="small error" id="collectorErrors"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Collected Markets</div>
+
+        <div class="grid2">
+          <label>
+            Search
+            <input id="marketsSearch" placeholder="nba, lakers, den, division..." />
+          </label>
+
+          <label>
+            League
+            <select id="marketsLeague">
+              <option value="">All</option>
+              <option value="NBA">NBA</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="grid3">
+          <label>
+            Sort
+            <select id="marketsSort">
+              <option value="updated_at">updated_at</option>
+              <option value="created_at">created_at</option>
+              <option value="end_time">end_time</option>
+              <option value="start_time">start_time</option>
+              <option value="title">title</option>
+              <option value="slug">slug</option>
+              <option value="market_type">market_type</option>
+            </select>
+          </label>
+
+          <label>
+            Dir
+            <select id="marketsDir">
+              <option value="desc">desc</option>
+              <option value="asc">asc</option>
+            </select>
+          </label>
+
+          <label>
+            Quick ranges
+            <select id="quickRange">
+              <option value="live">Live / Recent</option>
+              <option value="24h">Last 24h</option>
+              <option value="7d">Last 7d</option>
+              <option value="30d">Last 30d</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="table-wrap">
+          <table id="marketsTable">
+            <thead>
+              <tr>
+                <th>Slug</th>
+                <th>Title</th>
+                <th>Type</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="muted small" id="marketsMeta"></div>
+      </div>
+      <div class="card">
+  <div class="card-title">Slug Library</div>
+  <label>
+    Save slug
+    <div class="row">
+      <input id="libSlug" placeholder="nba-was-den-2026-01-17" style="flex:1"/>
+      <button id="btnLibSave" class="btn primary">Save</button>
+    </div>
+  </label>
+  <div class="muted small">Click a tag to add it to the collector list box.</div>
+  <div id="libTags" class="tagrow"></div>
+</div>
+    </section>
+
+    <!-- RIGHT: Selected market + snapshots -->
+    <section class="panel right">
+      <div class="card">
+        <div class="card-title">Selected Market</div>
+
+        <div class="selected">
+          <div>
+            <div class="big" id="selTitle">—</div>
+            <div class="muted small" id="selSlug">—</div>
+          </div>
+
+          <div class="row">
+            <button id="btnAddSelectedToCollector" class="btn">Add to collector</button>
+            <button id="btnRemoveSelectedFromCollector" class="btn">Remove</button>
+          </div>
+        </div>
+
+        <div class="grid4">
+          <div class="stat">
+            <div class="label">From</div>
+            <input id="snapFrom" type="datetime-local"/>
+          </div>
+          <div class="stat">
+            <div class="label">To</div>
+            <input id="snapTo" type="datetime-local"/>
+          </div>
+          <div class="stat">
+            <div class="label">Limit</div>
+            <input id="snapLimit" type="number" min="50" max="5000" value="500"/>
+          </div>
+          <div class="stat">
+            <div class="label">Actions</div>
+            <div class="row">
+              <button id="btnLoadSnapshots" class="btn primary">Load</button>
+              <button id="btnExportCsv" class="btn">Export CSV</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="muted small" id="snapMeta"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Snapshots</div>
+
+        <div class="table-wrap">
+          <table id="snapTable">
+            <thead>
+              <tr>
+                <th>ts</th>
+                <th>live</th>
+                <th>ended</th>
+                <th>period</th>
+                <th>elapsed</th>
+                <th>score</th>
+                <th>best_bid</th>
+                <th>best_ask</th>
+                <th>last_trade</th>
+                <th>spread</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="muted small">Tip: sorting is done by time DESC on the API, but you can click column headers soon if you want — say the word.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Log</div>
+        <pre id="log" class="log"></pre>
+      </div>
+      <div class="card">
+  <div class="card-title">Charts</div>
+  <div class="canvas-wrap">
+    <div>
+      <div class="muted small">Last Trade (over time)</div>
+      <canvas id="chartPrice" width="900" height="260"></canvas>
+    </div>
+    <div>
+      <div class="muted small">Spread (best_ask - best_bid)</div>
+      <canvas id="chartSpread" width="900" height="260"></canvas>
+    </div>
+  </div>
+</div>
+    </section>
+
+  <script src="app.js"></script>
+</body>
+</html>
+
