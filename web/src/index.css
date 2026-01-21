@@ -21,3 +21,34 @@ html, body {
 a { color: inherit; text-decoration: none; }
 button, input { font: inherit; }
 
+/* ===== Global readability fix ===== */
+:root {
+  color-scheme: light !important;
+}
+
+html, body, #root {
+  background: #f5f7fb;
+  color: #111827;
+}
+
+/* Make text readable inside cards/panels */
+* {
+  color: inherit;
+}
+
+/* Inputs/buttons: stop the dark theme look */
+input, select, textarea {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border: 1px solid #d1d5db !important;
+}
+
+button {
+  color: #111827;
+}
+
+/* If you have cards, make them pop */
+.card, .panel, .box {
+  background: #ffffff;
+  color: #111827;
+}
