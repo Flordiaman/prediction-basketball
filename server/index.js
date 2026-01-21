@@ -8,7 +8,10 @@ const path = require("path");
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json());app.get("/api/_build", (req, res) => {
+  res.json({ build: "2026-01-21-0252", ok: true });
+});
+
 const nbaHistory = require("./routes/nbahistory");
 app.use("/api/nba/history", nbaHistory);
 
@@ -191,9 +194,20 @@ app.get("/api/nba/db/players/search", (req, res) => {
     return res.status(500).json({ error: e.message || String(e) });
   }
 });
+
 app.use((err, req, res, next) => {
   console.error("UNHANDLED:", err);
   res.status(500).json({ error: err.message || String(err) });
+});
+app.get("/api/nba/db/_tables", (req, res) => {
+  try {
+    const rows = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+      .all();
+    res.json(rows.map(r => r.name));
+  } catch (e) {
+    res.status(500).json({ error: e.message || String(e) });
+  }
 });
 
 
