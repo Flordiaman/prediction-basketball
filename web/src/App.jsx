@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import NbaDbPanel from "./components/NbaDbPanel";
-import PlayerSearch from "./PlayerSearch";
+import PlayerSearch from "./components/PlayerSearch";
+
 
 
 function Card({ title, children }) {
