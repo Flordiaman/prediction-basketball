@@ -213,9 +213,10 @@ app.use(express.static(path.join(__dirname, "public")));
 
 // If you have a single-page app build in /public, this ensures refresh works.
 // It will NOT affect /api/* because we handled /api above.
-app.get("*", (req, res) => {
+app.get(/^(?!\/api).*/, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
+
 
 // -------------------------
 // 6) LISTEN
