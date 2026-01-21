@@ -15,7 +15,7 @@ function Card({ title, children }) {
         background: "white",
       }}
     >
-        <PlayerSearch onSelectPlayer={(p) => setPerson(p)} />
+       
       <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10 }}>{title}</div>
       {children}
     </div>
