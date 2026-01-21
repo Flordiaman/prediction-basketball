@@ -12,7 +12,8 @@ app.use(express.json());
 const nbaHistory = require("./routes/nbahistory");
 app.use("/api/nba/history", nbaHistory);
 
-const db = new Database("app.db");
+const db = new Database("nba_history.sqlite");
+
 
 // create a table for testing
 db.exec(`
@@ -167,38 +168,30 @@ app.get("/api/nba/db/players/search", (req, res) => {
 
   const like = `%${q}%`;
 
-  const sql = `
-    SELECT person_id,
-           COALESCE(display_first_last, person_name) AS display_first_last,
-           first_name,
-           last_name,
-           team_abbreviation
-    FROM players
-    WHERE COALESCE(display_first_last, person_name, '') LIKE ?
-       OR COALESCE(first_name, '') LIKE ?
-       OR COALESCE(last_name, '') LIKE ?
-    ORDER BY last_name ASC
-    LIMIT ?
-  `;
-
   try {
-    if (db && typeof db.all === "function") {
-      return db.all(sql, [like, like, like, limit], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows || []);
-      });
-    }
+    const sql = `
+      SELECT
+        person_id,
+        COALESCE(display_first_last, person_name) AS display_first_last,
+        first_name,
+        last_name,
+        team_abbreviation
+      FROM players
+      WHERE COALESCE(display_first_last, person_name, '') LIKE ?
+         OR COALESCE(first_name, '') LIKE ?
+         OR COALESCE(last_name, '') LIKE ?
+      ORDER BY last_name ASC
+      LIMIT ?
+    `;
 
-    if (db && typeof db.prepare === "function") {
-      const rows = db.prepare(sql).all(like, like, like, limit);
-      return res.json(rows || []);
-    }
-
-    return res.status(500).json({ error: "DB driver not supported" });
+    const rows = db.prepare(sql).all(like, like, like, limit);
+    res.json(rows || []);
   } catch (e) {
-    return res.status(500).json({ error: e.message || String(e) });
+    console.error("players/search error:", e);
+    res.status(500).json({ error: e.message || String(e) });
   }
 });
+
 
 
 const PORT = process.env.PORT || 5174;
