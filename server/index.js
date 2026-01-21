@@ -161,27 +161,43 @@ app.use((req, res, next) => {
 });
 
 app.get("/api/nba/db/players/search", (req, res) => {
-  const q = (req.query.q || "").trim();
+  const q = String(req.query.q || "").trim();
+  const limit = Math.min(parseInt(req.query.limit || "25", 10), 100);
   if (!q) return res.json([]);
 
-  db.all(
-    `
-    SELECT person_id, display_first_last, first_name, last_name, team_abbreviation
+  const like = `%${q}%`;
+
+  const sql = `
+    SELECT person_id,
+           COALESCE(display_first_last, person_name) AS display_first_last,
+           first_name,
+           last_name,
+           team_abbreviation
     FROM players
-    WHERE display_first_last LIKE ?
-       OR first_name LIKE ?
-       OR last_name LIKE ?
-    LIMIT 25
-    `,
-    [`%${q}%`, `%${q}%`, `%${q}%`],
-    (err, rows) => {
-      if (err) {
-        console.error(err);
-        return res.status(500).json({ error: err.message });
-      }
-      res.json(rows || []);
+    WHERE COALESCE(display_first_last, person_name, '') LIKE ?
+       OR COALESCE(first_name, '') LIKE ?
+       OR COALESCE(last_name, '') LIKE ?
+    ORDER BY last_name ASC
+    LIMIT ?
+  `;
+
+  try {
+    if (db && typeof db.all === "function") {
+      return db.all(sql, [like, like, like, limit], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows || []);
+      });
     }
-  );
+
+    if (db && typeof db.prepare === "function") {
+      const rows = db.prepare(sql).all(like, like, like, limit);
+      return res.json(rows || []);
+    }
+
+    return res.status(500).json({ error: "DB driver not supported" });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
 });
 
 
