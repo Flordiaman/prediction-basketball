@@ -160,6 +160,31 @@ app.use((req, res, next) => {
   res.sendFile(path.join(webDist, "index.html"));
 });
 
+app.get("/api/nba/db/players/search", (req, res) => {
+  const q = (req.query.q || "").trim();
+  if (!q) return res.json([]);
+
+  db.all(
+    `
+    SELECT person_id, display_first_last, first_name, last_name, team_abbreviation
+    FROM players
+    WHERE display_first_last LIKE ?
+       OR first_name LIKE ?
+       OR last_name LIKE ?
+    LIMIT 25
+    `,
+    [`%${q}%`, `%${q}%`, `%${q}%`],
+    (err, rows) => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ error: err.message });
+      }
+      res.json(rows || []);
+    }
+  );
+});
+
+
 const PORT = process.env.PORT || 5174;
 app.listen(PORT, () => {
   console.log(`API running on http://localhost:${PORT}`);
