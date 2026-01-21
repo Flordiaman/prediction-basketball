@@ -5,16 +5,16 @@ const { db, init } = require("../db.js");
 init();
 
 const polymarket = require("./polymarket");
-const { searchMarkets, getMarketTypes } = polymarket;
-
 console.log("POLYMARKET EXPORTS:", Object.keys(polymarket));
 console.log("SERVER.JS STARTED");
-
-
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+const nbaHistory = require("../server/routes/nbahistory");
+app.use("/api/nba/db", nbaHistory);
+
 
 app.get("/api/db/ping", (req, res) => {
   try {
@@ -196,6 +196,8 @@ app.get("/api/nba/history", (req, res) => {
   try {
     const slug = String(req.query.slug || "").trim();
     const limit = Number(req.query.limit || 50);
+    
+
     if (!slug) return res.status(400).json({ error: "Missing slug" });
 
    const rows = db.prepare(`
@@ -520,6 +522,33 @@ app.get("/api/db/snapshots", (req, res) => {
   const rows = db.prepare(sql).all(...params);
   res.json({ slug, count: rows.length, rows });
 });
+
+// Search players by name (SQLite example)
+app.get("/api/nba/db/players/search", (req, res) => {
+  const q = (req.query.q || "").trim();
+  const limit = Math.min(parseInt(req.query.limit || "25", 10), 100);
+
+  if (!q) return res.json([]);
+
+  // Adjust table/column names if yours differ
+  db.all(
+    `
+    SELECT person_id, first_name, last_name, display_first_last, team_id, team_abbreviation
+    FROM players
+    WHERE display_first_last LIKE ?
+       OR first_name LIKE ?
+       OR last_name LIKE ?
+    ORDER BY last_name ASC
+    LIMIT ?
+    `,
+    [`%${q}%`, `%${q}%`, `%${q}%`, limit],
+    (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(rows || []);
+    }
+  );
+});
+
 
 const port = Number(process.env.PORT || 5174);
 // Listen on all interfaces so localhost/127.0.0.1 works consistently

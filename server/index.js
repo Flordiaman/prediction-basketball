@@ -9,6 +9,8 @@ const path = require("path");
 const app = express();
 app.use(cors());
 app.use(express.json());
+const nbaHistory = require("./routes/nbahistory");
+app.use("/api/nba/history", nbaHistory);
 
 const db = new Database("app.db");
 

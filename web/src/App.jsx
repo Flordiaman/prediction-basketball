@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import NbaDbPanel from "./components/NbaDbPanel";
+import PlayerSearch from "./PlayerSearch";
+
 
 function Card({ title, children }) {
   return (
     <div
+    
       style={{
         border: "1px solid #e5e7eb",
         borderRadius: 12,
@@ -10,6 +14,7 @@ function Card({ title, children }) {
         background: "white",
       }}
     >
+        <PlayerSearch onSelectPlayer={(p) => setPerson(p)} />
       <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10 }}>{title}</div>
       {children}
     </div>
@@ -208,7 +213,9 @@ useEffect(() => {
               API connected ✅ <Badge>{health.serverTime}</Badge>
             </span>
           )}
+            
         </div>
+<NbaDbPanel />
 
         {err && (
           <div
