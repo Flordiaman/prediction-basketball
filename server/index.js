@@ -185,12 +185,17 @@ app.get("/api/nba/db/players/search", (req, res) => {
     `;
 
     const rows = db.prepare(sql).all(like, like, like, limit);
-    res.json(rows || []);
+    return res.json(rows || []);
   } catch (e) {
     console.error("players/search error:", e);
-    res.status(500).json({ error: e.message || String(e) });
+    return res.status(500).json({ error: e.message || String(e) });
   }
 });
+app.use((err, req, res, next) => {
+  console.error("UNHANDLED:", err);
+  res.status(500).json({ error: err.message || String(err) });
+});
+
 
 
 
