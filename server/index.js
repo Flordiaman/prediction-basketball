@@ -137,67 +137,59 @@ app.get("/api/games/today", async (req, res) => {
 });
 
 /* ---------- NBA DB DEBUG ---------- */
+// ...other API routes above...
+
 app.get("/api/nba/db/_tables", (req, res) => {
   try {
     const rows = db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
       .all();
-    res.json(rows.map(r => r.name));
+    res.json(rows.map((r) => r.name));
   } catch (e) {
     res.status(500).json({ error: e.message || String(e) });
   }
 });
 
-/* ---------- PLAYER SEARCH (better-sqlite3) ---------- */
 app.get("/api/nba/db/players/search", (req, res) => {
-  const q = String(req.query.q || "").trim();
+  const q = (req.query.q || "").trim();
   const limit = Math.min(parseInt(req.query.limit || "25", 10), 100);
-  if (!q) return res.json([]);
 
-  const like = `%${q}%`;
+  if (!q) return res.json([]);
 
   try {
     const sql = `
-      SELECT
-        person_id,
-        COALESCE(display_first_last, person_name) AS display_first_last,
-        first_name,
-        last_name,
-        team_abbreviation
+      SELECT person_id, first_name, last_name, display_first_last, team_id, team_abbreviation
       FROM players
-      WHERE COALESCE(display_first_last, person_name, '') LIKE ?
-         OR COALESCE(first_name, '') LIKE ?
-         OR COALESCE(last_name, '') LIKE ?
+      WHERE display_first_last LIKE ?
+         OR first_name LIKE ?
+         OR last_name LIKE ?
       ORDER BY last_name ASC
       LIMIT ?
     `;
-    const rows = db.prepare(sql).all(like, like, like, limit);
+
+    const rows = db.prepare(sql).all(`%${q}%`, `%${q}%`, `%${q}%`, limit);
     res.json(rows || []);
-  } catch (e) {
-    console.error("players/search error:", e);
-    res.status(500).json({ error: e.message || String(e) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-/* ---------- STATIC WEB ---------- */
+// keep this last:
 const webDist = path.join(__dirname, "../web/dist");
 console.log("Serving web from:", webDist);
 app.use(express.static(webDist));
 
-/* ---------- SPA FALLBACK ---------- */
 app.use((req, res, next) => {
   if (req.method !== "GET") return next();
   if (req.path.startsWith("/api/")) return next();
   res.sendFile(path.join(webDist, "index.html"));
 });
 
-/* ---------- ERROR HANDLER (LAST) ---------- */
 app.use((err, req, res, next) => {
   console.error("UNHANDLED:", err);
   res.status(500).json({ error: err.message || String(err) });
 });
 
-/* ---------- START ---------- */
 const PORT = process.env.PORT || 5174;
 app.listen(PORT, () => {
   console.log(`API running on http://localhost:${PORT}`);

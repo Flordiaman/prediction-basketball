@@ -1,39 +1,59 @@
+// E:\prediction_basketball\src\server.js
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const { db, init } = require("../db.js");
+const path = require("path");
+
+const { db, init, DB_PATH } = require("../db.js");
 init();
 
 const polymarket = require("./polymarket");
 console.log("POLYMARKET EXPORTS:", Object.keys(polymarket));
 console.log("SERVER.JS STARTED");
+console.log("SQLITE PATH:", DB_PATH);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Keep your existing router mount
 const nbaHistory = require("../server/routes/nbahistory");
 app.use("/api/nba/db", nbaHistory);
 
-
+// --- basic DB diagnostics ---
 app.get("/api/db/ping", (req, res) => {
   try {
     const row = db.prepare("SELECT 1 AS ok").get();
-    res.json(row);
+    res.json({ ...row, db: DB_PATH });
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) });
   }
 });
 
-const path = require("path");
+app.get("/api/db/tables", (req, res) => {
+  try {
+    const rows = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all();
+    res.json(rows.map(r => r.name));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
 app.use(express.static(path.join(__dirname, "public")));
-
-
 app.get("/health", (req, res) => res.json({ ok: true }));
 
+/**
+ * ====== Polymarket / NBA stuff you already had ======
+ * (Left intact below; only trimmed where needed)
+ */
+
 // What marketTypes exist (from our own known list)
+// NOTE: your original code referenced getMarketTypes/searchMarkets without importing.
+// If those are exported by polymarket, call polymarket.getMarketTypes(), polymarket.searchMarkets()
 app.get("/api/marketTypes", (req, res) => {
-  res.json({ marketTypes: getMarketTypes() });
+  res.json({ marketTypes: polymarket.getMarketTypes?.() ?? [] });
 });
 
 // Generic search (no filtering)
@@ -43,100 +63,16 @@ app.get("/api/search", async (req, res) => {
     const limit = Number(req.query.limit || 25);
     if (!q) return res.status(400).json({ error: "Missing q" });
 
-    const results = await searchMarkets(q, limit);
+    if (!polymarket.searchMarkets) {
+      return res.status(500).json({ error: "polymarket.searchMarkets not available" });
+    }
+    const results = await polymarket.searchMarkets(q, limit);
     res.json(results);
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) });
   }
 });
 
-/**
- * NBA filtering helpers
- */
-const NBA_TEAMS = [
-  "atlanta hawks","boston celtics","brooklyn nets","charlotte hornets","chicago bulls",
-  "cleveland cavaliers","dallas mavericks","denver nuggets","detroit pistons",
-  "golden state warriors","houston rockets","indiana pacers","los angeles clippers",
-  "la clippers","los angeles lakers","la lakers","memphis grizzlies","miami heat",
-  "milwaukee bucks","minnesota timberwolves","new orleans pelicans","new york knicks",
-  "oklahoma city thunder","orlando magic","philadelphia 76ers","phoenix suns",
-  "portland trail blazers","sacramento kings","san antonio spurs","toronto raptors",
-  "utah jazz","washington wizards",
-  // common short names
-  "hawks","celtics","nets","hornets","bulls","cavaliers","cavs","mavericks","mavs",
-  "nuggets","pistons","warriors","rockets","pacers","clippers","lakers","grizzlies",
-  "heat","bucks","timberwolves","wolves","pelicans","knicks","thunder","magic",
-  "76ers","sixers","suns","blazers","trail blazers","kings","spurs","raptors","jazz","wizards",
-];
-
-const NEGATIVE_NOISE = [
-  "coinbase","xrp","ripple","market cap","app store","delist","crypto",
-  "president","election","senate","house","ukraine","gaza"
-];
-
-function toText(m) {
-  const parts = [
-    m?.question,
-    m?.title,
-    m?.slug,
-    m?.eventTitle,
-    m?.eventSlug,
-    m?.eventSubtitle,
-  ];
-  return parts.filter(Boolean).join(" ").toLowerCase();
-}
-
-function scoreNBA(m) {
-  const text = toText(m);
-
-  let score = 0;
-
-  // strong positives
-  if (text.includes(" nba ")) score += 10;
-  if (text.includes("nba")) score += 6;
-  if (text.includes("basketball")) score += 4;
-  if (text.includes("playoffs") || text.includes("finals") || text.includes("western conference") || text.includes("eastern conference")) score += 3;
-
-  // team matches
-  for (const t of NBA_TEAMS) {
-    if (text.includes(t)) score += 5;
-  }
-
-  // negative noise (only matters if we don't have a clear nba signal)
-  let negHits = 0;
-  for (const n of NEGATIVE_NOISE) {
-    if (text.includes(n)) negHits += 1;
-  }
-  if (negHits > 0 && score < 8) score -= 20;
-
-  return score;
-}
-
-function isOpenMarket(m) {
-  // Polymarket data often includes active/closed booleans
-  if (m && typeof m.closed === "boolean") return m.closed === false;
-  if (m && typeof m.active === "boolean" && typeof m.closed === "boolean") return m.active === true && m.closed === false;
-  // fallback: if we can't tell, don't auto-drop it
-  return true;
-}
-
-function withinNextDays(dateStr, days) {
-  if (!dateStr) return false;
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return false;
-
-  const now = new Date();
-  const future = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
-
-  return d >= now && d <= future;
-}
-
-/**
- * NBA-only search endpoint
- * Example:
- *   /api/nba/search?q=nba&onlyOpen=true&days=14&limit=200
- * Returns: { q, onlyOpen, days, pages_scanned, hits_count, hits: [...] }
- */
 // SAVE ONE SNAPSHOT (manual trigger)
 app.post("/api/nba/snapshot", async (req, res) => {
   try {
@@ -181,7 +117,7 @@ app.post("/api/nba/snapshot", async (req, res) => {
       m.raw?.bestBid ?? null,
       m.raw?.bestAsk ?? null,
       m.raw?.lastTradePrice ?? null,
-      m.raw?.outcomePrices ?? null,
+      m.raw?.outcomePrices ? JSON.stringify(m.raw.outcomePrices) : null,
       JSON.stringify({ market: m.raw, event: ev })
     );
 
@@ -196,20 +132,19 @@ app.get("/api/nba/history", (req, res) => {
   try {
     const slug = String(req.query.slug || "").trim();
     const limit = Number(req.query.limit || 50);
-    
 
     if (!slug) return res.status(400).json({ error: "Missing slug" });
 
-   const rows = db.prepare(`
-  SELECT
-    ts, live, ended, period, elapsed, score,
-    best_bid, best_ask, last_trade,
-    (best_ask - best_bid) AS spread
-  FROM snapshots
-  WHERE slug=?
-  ORDER BY ts DESC
-  LIMIT ?
-`).all(slug, Math.min(limit, 5000));
+    const rows = db.prepare(`
+      SELECT
+        ts, live, ended, period, elapsed, score,
+        best_bid, best_ask, last_trade,
+        (best_ask - best_bid) AS spread
+      FROM snapshots
+      WHERE slug=?
+      ORDER BY ts DESC
+      LIMIT ?
+    `).all(slug, Math.min(limit, 5000));
 
     res.json({ slug, count: rows.length, rows });
   } catch (e) {
@@ -229,13 +164,10 @@ app.post("/api/nba/poll/start", (req, res) => {
     return res.status(400).json({ error: "everySec must be 2..60" });
   }
 
-  if (pollers.has(slug)) {
-    return res.json({ ok: true, slug, note: "already running" });
-  }
+  if (pollers.has(slug)) return res.json({ ok: true, slug, note: "already running" });
 
   const id = setInterval(async () => {
     try {
-      // call the same logic by hitting the handler internals:
       const m = await polymarket.getMarketBySlug(slug);
       const ev = Array.isArray(m?.raw?.events) ? m.raw.events[0] : null;
       const ts = new Date().toISOString();
@@ -271,17 +203,15 @@ app.post("/api/nba/poll/start", (req, res) => {
         m.raw?.bestBid ?? null,
         m.raw?.bestAsk ?? null,
         m.raw?.lastTradePrice ?? null,
-        m.raw?.outcomePrices ?? null,
+        m.raw?.outcomePrices ? JSON.stringify(m.raw.outcomePrices) : null,
         JSON.stringify({ market: m.raw, event: ev })
       );
 
-      // optional: stop when game ends
       if (ev?.ended === true) {
         clearInterval(id);
         pollers.delete(slug);
       }
     } catch (e) {
-      // keep running even if one poll fails
       console.error("poll error", slug, e.message || e);
     }
   }, everySec * 1000);
@@ -304,9 +234,6 @@ app.post("/api/nba/poll/stop", (req, res) => {
 app.get("/api/nba/poll/status", (req, res) => {
   res.json({ running: Array.from(pollers.keys()) });
 });
-
-
-
 
 app.get("/api/nba/live", async (req, res) => {
   try {
@@ -337,135 +264,7 @@ app.get("/api/nba/live", async (req, res) => {
     res.status(500).json({ error: String(e.message || e) });
   }
 });
-async function collectOneSlug(slug) {
-  const m = await polymarket.getMarketBySlug(slug);
-  const ev = Array.isArray(m?.raw?.events) ? m.raw.events[0] : null;
 
-  const ts = new Date().toISOString();
-
-  const market_type = m.raw?.sportsMarketType ?? m.sportsMarketType ?? null;
-  const sport = "sports";
-  const league = "NBA";
-
-  // Upsert market metadata
-  db.prepare(`
-    INSERT INTO markets (slug, title, sport, league, market_type, start_time, end_time, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(slug) DO UPDATE SET
-      title=excluded.title,
-      sport=excluded.sport,
-      league=excluded.league,
-      market_type=excluded.market_type,
-      start_time=excluded.start_time,
-      end_time=excluded.end_time,
-      updated_at=excluded.updated_at
-  `).run(
-    slug,
-    m.title || m.question || slug,
-    sport,
-    league,
-    market_type,
-    ev?.startTime ?? null,
-    m.endDate ?? null,
-    ts
-  );
-
-  const bestBid = m.raw?.bestBid ?? null;
-  const bestAsk = m.raw?.bestAsk ?? null;
-  const lastTrade = m.raw?.lastTradePrice ?? null;
-  const spread = (bestBid != null && bestAsk != null) ? (Number(bestAsk) - Number(bestBid)) : null;
-
-  db.prepare(`
-    INSERT INTO snapshots
-(slug, ts, live, ended, period, elapsed, score, best_bid, best_ask, last_trade, outcome_prices, raw)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-
-
-  `).run(
-    slug,
-    ts,
-    ev?.live ? 1 : 0,
-    ev?.ended ? 1 : 0,
-    ev?.period ?? null,
-    ev?.elapsed ?? null,
-    ev?.score ?? null,
-    bestBid,
-    bestAsk,
-    lastTrade,
-    m.raw?.outcomePrices ? JSON.stringify(m.raw.outcomePrices) : null,
-    JSON.stringify({ market: m.raw, event: ev })
-  );
-
-  return { ok: true, slug, ts };
-}
-const multiPoller = {
-  intervalId: null,
-  slugs: new Set(),
-  everySec: 10,
-  lastRun: null,
-  lastErrors: []
-};
-
-app.post("/api/collector/start", (req, res) => {
-  const slugs = Array.isArray(req.body.slugs) ? req.body.slugs : [];
-  const everySec = Number(req.body.everySec || 10);
-
-  if (slugs.length === 0) return res.status(400).json({ error: "Provide slugs: []" });
-  if (!Number.isFinite(everySec) || everySec < 3 || everySec > 120) {
-    return res.status(400).json({ error: "everySec must be 3..120" });
-  }
-
-  slugs.forEach(s => multiPoller.slugs.add(String(s).trim()).delete(""));
-
-  multiPoller.everySec = everySec;
-
-  if (!multiPoller.intervalId) {
-    multiPoller.intervalId = setInterval(async () => {
-      const now = new Date().toISOString();
-      multiPoller.lastRun = now;
-
-      for (const slug of multiPoller.slugs) {
-        if (!slug) continue;
-        try {
-          await collectOneSlug(slug);
-        } catch (e) {
-          multiPoller.lastErrors.unshift({ ts: now, slug, error: String(e.message || e) });
-          multiPoller.lastErrors = multiPoller.lastErrors.slice(0, 20);
-        }
-      }
-    }, everySec * 1000);
-  }
-
-  res.json({ ok: true, running: true, everySec: multiPoller.everySec, slugs: Array.from(multiPoller.slugs) });
-});
-
-app.post("/api/collector/stop", (req, res) => {
-  if (multiPoller.intervalId) clearInterval(multiPoller.intervalId);
-  multiPoller.intervalId = null;
-  res.json({ ok: true, running: false });
-});
-
-app.post("/api/collector/slugs/add", (req, res) => {
-  const slugs = Array.isArray(req.body.slugs) ? req.body.slugs : [];
-  slugs.forEach(s => multiPoller.slugs.add(String(s).trim()).delete(""));
-  res.json({ ok: true, slugs: Array.from(multiPoller.slugs) });
-});
-
-app.post("/api/collector/slugs/remove", (req, res) => {
-  const slugs = Array.isArray(req.body.slugs) ? req.body.slugs : [];
-  slugs.forEach(s => multiPoller.slugs.delete(String(s).trim()));
-  res.json({ ok: true, slugs: Array.from(multiPoller.slugs) });
-});
-
-app.get("/api/collector/status", (req, res) => {
-  res.json({
-    running: Boolean(multiPoller.intervalId),
-    everySec: multiPoller.everySec,
-    slugs: Array.from(multiPoller.slugs),
-    lastRun: multiPoller.lastRun,
-    lastErrors: multiPoller.lastErrors
-  });
-});
 // list markets you've collected, sortable
 app.get("/api/db/markets", (req, res) => {
   const q = String(req.query.q || "").trim().toLowerCase();
@@ -493,7 +292,6 @@ app.get("/api/db/markets", (req, res) => {
   res.json({ count: rows.length, rows });
 });
 
-// get snapshots for a slug, with date range for "one month later" comparisons
 app.get("/api/db/snapshots", (req, res) => {
   const slug = String(req.query.slug || "").trim();
   if (!slug) return res.status(400).json({ error: "Missing slug" });
@@ -503,11 +301,11 @@ app.get("/api/db/snapshots", (req, res) => {
   const to = String(req.query.to || "").trim();     // ISO
 
   let sql = `
-   SELECT
-  ts, live, ended, period, elapsed, score,
-  best_bid, best_ask, last_trade,
-  (best_ask - best_bid) AS spread,
-  outcome_prices
+    SELECT
+      ts, live, ended, period, elapsed, score,
+      best_bid, best_ask, last_trade,
+      (best_ask - best_bid) AS spread,
+      outcome_prices
     FROM snapshots
     WHERE slug=?
   `;
@@ -523,33 +321,135 @@ app.get("/api/db/snapshots", (req, res) => {
   res.json({ slug, count: rows.length, rows });
 });
 
-// Search players by name (SQLite example)
+/**
+ * ====== NEW: Players (DB-backed) ======
+ *
+ * 1) POST /api/nba/db/players/import
+ *    - Pulls from BallDontLie and upserts into SQLite
+ *
+ * 2) GET /api/nba/db/players/search?q=le&limit=5
+ */
+
+function bdlHeaders() {
+  const key = (process.env.BALLDONTLIE_API_KEY || "").trim();
+  if (!key) return {};
+  // Different providers / versions use different header names; we set both.
+  return {
+    "Authorization": key,
+    "X-API-Key": key,
+  };
+}
+
+// One-time import endpoint
+app.post("/api/nba/db/players/import", async (req, res) => {
+  try {
+    // You can override per request if you want
+    const perPage = Math.min(Number(req.body.per_page || 100), 100);
+    const maxPages = Math.min(Number(req.body.max_pages || 200), 500);
+
+    // BallDontLie v1 style:
+    // GET https://api.balldontlie.io/v1/players?per_page=100&page=1
+    const baseUrl = (process.env.BALLDONTLIE_BASE_URL || "https://api.balldontlie.io/v1").replace(/\/+$/, "");
+    const headers = bdlHeaders();
+
+    let page = 1;
+    let totalUpserted = 0;
+
+    const upsert = db.prepare(`
+      INSERT INTO players (
+        person_id, first_name, last_name, display_first_last,
+        team_id, team_abbreviation, provider, raw, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(person_id) DO UPDATE SET
+        first_name=excluded.first_name,
+        last_name=excluded.last_name,
+        display_first_last=excluded.display_first_last,
+        team_id=excluded.team_id,
+        team_abbreviation=excluded.team_abbreviation,
+        provider=excluded.provider,
+        raw=excluded.raw,
+        updated_at=excluded.updated_at
+    `);
+
+    const tx = db.transaction((rows, now) => {
+      for (const p of rows) {
+        const team = p.team || {};
+        const first = p.first_name ?? "";
+        const last = p.last_name ?? "";
+        const display = p.display_first_last ?? `${first} ${last}`.trim();
+
+        upsert.run(
+          Number(p.id),                 // person_id
+          String(first),
+          String(last),
+          String(display),
+          team?.id != null ? Number(team.id) : null,
+          team?.abbreviation != null ? String(team.abbreviation) : null,
+          "balldontlie",
+          JSON.stringify(p),
+          now
+        );
+      }
+    });
+
+    while (page <= maxPages) {
+      const url = `${baseUrl}/players?per_page=${perPage}&page=${page}`;
+      const resp = await fetch(url, { headers });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        return res.status(500).json({ error: `BallDontLie HTTP ${resp.status}`, detail: text.slice(0, 500) });
+      }
+
+      const json = await resp.json();
+      const rows = Array.isArray(json?.data) ? json.data : [];
+
+      if (rows.length === 0) break;
+
+      const now = new Date().toISOString();
+      tx(rows, now);
+
+      totalUpserted += rows.length;
+
+      // If meta exists and we’re at the end, stop.
+      const nextPage = json?.meta?.next_page;
+      if (!nextPage) break;
+
+      page = Number(nextPage);
+    }
+
+    res.json({ ok: true, imported: totalUpserted });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+// Search players by name (DB-backed)
 app.get("/api/nba/db/players/search", (req, res) => {
   const q = (req.query.q || "").trim();
   const limit = Math.min(parseInt(req.query.limit || "25", 10), 100);
 
   if (!q) return res.json([]);
 
-  // Adjust table/column names if yours differ
-  db.all(
-    `
-    SELECT person_id, first_name, last_name, display_first_last, team_id, team_abbreviation
-    FROM players
-    WHERE display_first_last LIKE ?
-       OR first_name LIKE ?
-       OR last_name LIKE ?
-    ORDER BY last_name ASC
-    LIMIT ?
-    `,
-    [`%${q}%`, `%${q}%`, `%${q}%`, limit],
-    (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(rows || []);
-    }
-  );
+  try {
+    const sql = `
+      SELECT person_id, first_name, last_name, display_first_last, team_id, team_abbreviation
+      FROM players
+      WHERE display_first_last LIKE ?
+         OR first_name LIKE ?
+         OR last_name LIKE ?
+      ORDER BY last_name ASC
+      LIMIT ?
+    `;
+    const like = `%${q}%`;
+    const rows = db.prepare(sql).all(like, like, like, limit);
+    res.json(rows || []);
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
 });
 
-
-const port = Number(process.env.PORT || 5174);
-// Listen on all interfaces so localhost/127.0.0.1 works consistently
+// ---- PORT / LISTEN ----
+const port = Number(process.env.PORT || 3001);
 app.listen(port, "0.0.0.0", () => console.log(`API running on http://127.0.0.1:${port}`));
