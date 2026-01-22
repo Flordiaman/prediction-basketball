@@ -30,3 +30,5 @@ coverage/
 
 # optional: if you generate NBA build into this folder, ignore it
 # src/nba_public/
+# allow the deployed NBA database
+!src/nba.sqlite
