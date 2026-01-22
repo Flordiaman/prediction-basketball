@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>NBA</title>
+    <style>
+      body { font-family: system-ui, Arial, sans-serif; margin: 20px; }
+      .pill { display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid #ccc; }
+      .ok { border-color: #2ecc71; color:#1f8a4c; }
+      .err { border-color: #e74c3c; color:#b03a2e; }
+      ul { padding-left: 18px; }
+      li { margin: 6px 0; }
+      .muted { opacity: .7; }
+    </style>
+  </head>
+  <body>
+    <h1>NBA Stats</h1>
+    <div id="status" class="pill muted">Checking NBA API…</div>
+
+    <h2 style="margin-top:16px;">Teams</h2>
+    <div class="muted">Source: <code>/api/nba/teams</code></div>
+    <ul id="teams"></ul>
+
+    <script>
+      const statusEl = document.getElementById("status");
+      const teamsEl = document.getElementById("teams");
+
+      async function run() {
+        try {
+          const h = await fetch("/api/nba/health");
+          if (!h.ok) throw new Error("health HTTP " + h.status);
+          const health = await h.json();
+
+          statusEl.textContent = "NBA API OK (" + health.time + ")";
+          statusEl.className = "pill ok";
+
+          const t = await fetch("/api/nba/teams");
+          if (!t.ok) throw new Error("teams HTTP " + t.status);
+          const teams = await t.json();
+
+          teamsEl.innerHTML = "";
+          teams.forEach(x => {
+            const li = document.createElement("li");
+            li.textContent = `${x.abbreviation} — ${x.full_name} (${x.conference} / ${x.division})`;
+            teamsEl.appendChild(li);
+          });
+        } catch (e) {
+          statusEl.textContent = "NBA API ERROR: " + (e && e.message ? e.message : e);
+          statusEl.className = "pill err";
+        }
+      }
+
+      run();
+    </script>
+  </body>
+</html>

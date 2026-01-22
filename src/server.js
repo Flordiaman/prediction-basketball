@@ -9,10 +9,20 @@ const { db, init, DB_PATH } = require("../db.js");
 init();
 
 const polymarket = require("./polymarket");
+const { openNbaDb } = require("./nbaDb");
+const makeNbaRouter = require("./nbaRouter"); // ✅
+
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+// --- NBA (isolated) ---
+// Separate DB file + separate API prefix so we do NOT touch Polymarket behavior.
+const nbaOpened = openNbaDb();
+const nbaDb = nbaOpened.db;
+app.use("/api/nba", makeNbaRouter(nbaDb, { NBA_DB_PATH: nbaOpened.NBA_DB_PATH }));
+
+
 
 // -------------------------
 // 1) ALWAYS REGISTER API + HEALTH FIRST (before any static/SPAs)
@@ -213,6 +223,12 @@ app.use(express.static(path.join(__dirname, "public")));
 
 // If you have a single-page app build in /public, this ensures refresh works.
 // It will NOT affect /api/* because we handled /api above.
+// --- NBA PAGE (must be above SPA fallback) ---
+
+// --- NBA REACT (static build) ---
+app.use("/nba", express.static(path.join(__dirname, "nba_public"), { index: "index.html" }));
+
+// Polymarket SPA fallback (unchanged)
 app.get(/^(?!\/api).*/, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
