@@ -8,6 +8,8 @@ const NBA_DB_PATH = process.env.NBA_DB_PATH || path.join(__dirname, "nba.sqlite"
 
 function openNbaDb() {
   const exists = fs.existsSync(NBA_DB_PATH);
+    const first = !exists;
+
 
   // In production, fail loudly if DB missing (prevents creating an empty DB)
   if (process.env.NODE_ENV === "production" && !exists) {
