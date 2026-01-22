@@ -3,15 +3,23 @@ const path = require("path");
 const fs = require("fs");
 const Database = require("better-sqlite3");
 
-const NBA_DB_PATH =
-  process.env.NBA_DB_PATH || path.join(process.cwd(), "nba.sqlite");
+// Always default to the DB shipped in /src
+const NBA_DB_PATH = process.env.NBA_DB_PATH || path.join(__dirname, "nba.sqlite");
 
 function openNbaDb() {
-  const first = !fs.existsSync(NBA_DB_PATH);
+  const exists = fs.existsSync(NBA_DB_PATH);
+
+  // In production, fail loudly if DB missing (prevents creating an empty DB)
+  if (process.env.NODE_ENV === "production" && !exists) {
+    throw new Error(`NBA sqlite DB not found at: ${NBA_DB_PATH}`);
+  }
+
   const db = new Database(NBA_DB_PATH);
 
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+
+  // (Keep your existing schema exec below)
 
   // Schema (NBA-only DB; does not touch polymarket DB)
   db.exec(`
