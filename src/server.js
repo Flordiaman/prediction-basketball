@@ -13,22 +13,28 @@ const { openNbaDb } = require("./nbaDb");
 const makeNbaRouter = require("./nbaRouter"); // ✅
 const { openPmDb } = require("./pmDb");
 
-
 const app = express();
 app.use(cors());
 app.use(express.json());
-// --- NBA (isolated) ---
-// Separate DB file + separate API prefix so we do NOT touch Polymarket behavior.
+
+// -------------------------
+// NBA (isolated)
+// -------------------------
 const nbaOpened = openNbaDb();
 const nbaDb = nbaOpened.db;
 app.use("/api/nba", makeNbaRouter(nbaDb, { NBA_DB_PATH: nbaOpened.NBA_DB_PATH }));
 
-
+// Mount your existing DB history router (keep this)
+try {
+  const nbaHistory = require("../server/routes/nbahistory");
+  app.use("/api/nba/db", nbaHistory);
+} catch (e) {
+  console.log("nbaHistory router not loaded:", e?.message || e);
+}
 
 // -------------------------
-// 1) ALWAYS REGISTER API + HEALTH FIRST (before any static/SPAs)
+// 1) HEALTH + DB DEBUG
 // -------------------------
-
 app.get("/health", (req, res) => res.json({ ok: true }));
 
 app.get("/api/db/ping", (req, res) => {
@@ -51,36 +57,26 @@ app.get("/api/db/tables", (req, res) => {
   }
 });
 
-// Mount your existing DB history router (keep this)
-try {
-  const nbaHistory = require("../server/routes/nbahistory");
-  app.use("/api/nba/db", nbaHistory);
-} catch (e) {
-  console.log("nbaHistory router not loaded:", e?.message || e);
-}
-
 // -------------------------
 // 2) PLAYERS: IMPORT + SEARCH (DB-backed)
 // -------------------------
-
 function bdlHeaders() {
   const key = (process.env.BALLDONTLIE_API_KEY || "").trim();
   if (!key) return {};
-  // Some providers use Authorization, some use X-API-Key
   return { Authorization: key, "X-API-Key": key };
 }
 
-// One-time import endpoint
 app.post("/api/nba/db/players/import", async (req, res) => {
   try {
     const perPage = Math.min(Number(req.body.per_page || 100), 100);
     const maxPages = Math.min(Number(req.body.max_pages || 200), 500);
 
-    const baseUrl = (process.env.BALLDONTLIE_BASE_URL || "https://api.balldontlie.io/v1")
-      .replace(/\/+$/, "");
+    const baseUrl = (process.env.BALLDONTLIE_BASE_URL || "https://api.balldontlie.io/v1").replace(
+      /\/+$/,
+      ""
+    );
 
     const headers = bdlHeaders();
-
     let page = 1;
     let totalUpserted = 0;
 
@@ -136,7 +132,6 @@ app.post("/api/nba/db/players/import", async (req, res) => {
 
       const json = await resp.json();
       const rows = Array.isArray(json?.data) ? json.data : [];
-
       if (rows.length === 0) break;
 
       const now = new Date().toISOString();
@@ -154,7 +149,6 @@ app.post("/api/nba/db/players/import", async (req, res) => {
   }
 });
 
-// Search players by name
 app.get("/api/nba/db/players/search", (req, res) => {
   const q = (req.query.q || "").trim();
   const limit = Math.min(parseInt(req.query.limit || "25", 10), 100);
@@ -179,12 +173,13 @@ app.get("/api/nba/db/players/search", (req, res) => {
 });
 
 // -------------------------
-// 3) YOUR EXISTING POLYMARKET / SNAPSHOT STUFF (kept minimal)
+// 3) POLYMARKET API + DB
 // -------------------------
-
 console.log("POLYMARKET EXPORTS:", Object.keys(polymarket));
 console.log("SERVER.JS STARTED");
 console.log("SQLITE PATH:", DB_PATH);
+
+const pmDb = openPmDb();
 
 // market types
 app.get("/api/marketTypes", (req, res) => {
@@ -207,10 +202,8 @@ app.get("/api/search", async (req, res) => {
     res.status(500).json({ error: String(e.message || e) });
   }
 });
-// -------------------------
-// Polymarket DB + routes
-// -------------------------
 
+// Save search result object (or minimal slug/title/league)
 app.post("/api/db/markets/save", (req, res) => {
   const m = req.body || {};
   const slug = String(m.slug || m.marketSlug || m.id || "").trim();
@@ -232,119 +225,7 @@ app.post("/api/db/markets/save", (req, res) => {
   res.json({ ok: true, slug, title, league });
 });
 
-// get one polymarket market by slug
-app.get("/api/pm/market", async (req, res) => {
-  try {
-    const slug = String(req.query.slug || "").trim();
-    if (!slug) return res.status(400).json({ error: "Missing slug" });
-
-    if (!polymarket.getMarketBySlug) {
-      return res.status(500).json({ error: "polymarket.getMarketBySlug not available" });
-    }
-
-    const m = await polymarket.getMarketBySlug(slug);
-    res.json(m);
-  } catch (e) {
-    res.status(500).json({ error: String(e.message || e) });
-  }
-});
-
-// collect ONE snapshot for a saved polymarket slug
-app.post("/api/collector/collect-one", async (req, res) => {
-  try {
-    const slug = String(req.body.slug || "").trim();
-    if (!slug) return res.status(400).json({ error: "Missing slug" });
-
-    const m = await polymarket.getMarketBySlug(slug);
-    if (!m) return res.status(404).json({ error: "Market not found" });
-
-    // pick a price safely (fallbacks included)
-const r = m.raw || {};
-const price =
-  (r.lastTradePrice != null ? Number(r.lastTradePrice) : null);
-
-const bestBid =
-  (r.bestBid != null ? Number(r.bestBid) : null);
-
-const bestAsk =
-  (r.bestAsk != null ? Number(r.bestAsk) : null);
-
-const volume =
-  (r.volume != null ? Number(r.volume) : null);
-
-   pmDb.prepare(`
-  INSERT INTO pm_snapshots (slug, ts, price, best_bid, best_ask, volume, raw_json)
-  VALUES (?, datetime('now'), ?, ?, ?, ?, ?)
-`).run(slug, price, bestBid, bestAsk, volume, JSON.stringify(m));
-
-
-    res.json({ ok: true, slug, price, ts: new Date().toISOString() });
-  } catch (e) {
-    res.status(500).json({ error: String(e.message || e) });
-  }
-});
-
-
-const pmDb = openPmDb();
-
-app.get("/api/db/markets", (req, res) => {
-  const q = String(req.query.q || "").trim().toLowerCase();
-  const league = String(req.query.league || "").trim().toLowerCase();
-  const sort = String(req.query.sort || "updated_at");
-  const dir = String(req.query.dir || "desc").toLowerCase() === "asc" ? "ASC" : "DESC";
-  const limit = Math.min(Math.max(Number(req.query.limit || 200), 1), 1000);
-
-  const sortCol = (["updated_at", "slug", "league", "title"].includes(sort)) ? sort : "updated_at";
-
-  let where = "1=1";
-  const params = {};
-
-  if (q) {
-    where += " AND (lower(slug) LIKE @q OR lower(title) LIKE @q)";
-    params.q = `%${q}%`;
-  }
-  if (league) {
-    where += " AND lower(league) = @league";
-    params.league = league;
-  }
-
-  const rows = pmDb.prepare(`
-    SELECT slug, league, title, active, updated_at
-    FROM pm_markets
-    WHERE ${where}
-    ORDER BY ${sortCol} ${dir}
-    LIMIT @limit
-  `).all({ ...params, limit });
-
-  res.json({ rows });
-});
-
-app.get("/api/db/snapshots", (req, res) => {
-  const slug = String(req.query.slug || "").trim();
-  const limit = Math.min(Math.max(Number(req.query.limit || 500), 1), 5000);
-  const from = String(req.query.from || "").trim();
-  const to = String(req.query.to || "").trim();
-
-  if (!slug) return res.status(400).json({ error: "Missing slug" });
-
-  let where = "slug = @slug";
-  const params = { slug, limit };
-
-  if (from) { where += " AND ts >= @from"; params.from = from; }
-  if (to)   { where += " AND ts <= @to";   params.to = to;   }
-
-  const rows = pmDb.prepare(`
-    SELECT ts, price, best_bid, best_ask, volume
-    FROM pm_snapshots
-    WHERE ${where}
-    ORDER BY ts DESC
-    LIMIT @limit
-  `).all(params);
-
-  res.json({ rows });
-});
-
-// Save (or update) a market slug from the UI
+// Save (or update) a market slug from the UI (manual)
 app.post("/api/db/markets", (req, res) => {
   const slug = String(req.body.slug || "").trim();
   const league = String(req.body.league || "").trim();
@@ -364,20 +245,133 @@ app.post("/api/db/markets", (req, res) => {
 
   res.json({ ok: true, slug });
 });
+
+// list saved markets
+app.get("/api/db/markets", (req, res) => {
+  const q = String(req.query.q || "").trim().toLowerCase();
+  const league = String(req.query.league || "").trim().toLowerCase();
+  const sort = String(req.query.sort || "updated_at");
+  const dir = String(req.query.dir || "desc").toLowerCase() === "asc" ? "ASC" : "DESC";
+  const limit = Math.min(Math.max(Number(req.query.limit || 200), 1), 1000);
+
+  const sortCol = ["updated_at", "slug", "league", "title"].includes(sort) ? sort : "updated_at";
+
+  let where = "1=1";
+  const params = {};
+
+  if (q) {
+    where += " AND (lower(slug) LIKE @q OR lower(title) LIKE @q)";
+    params.q = `%${q}%`;
+  }
+  if (league) {
+    where += " AND lower(league) = @league";
+    params.league = league;
+  }
+
+  const rows = pmDb
+    .prepare(
+      `
+    SELECT slug, league, title, active, updated_at
+    FROM pm_markets
+    WHERE ${where}
+    ORDER BY ${sortCol} ${dir}
+    LIMIT @limit
+  `
+    )
+    .all({ ...params, limit });
+
+  res.json({ rows });
+});
+
+// snapshots for a slug
+app.get("/api/db/snapshots", (req, res) => {
+  const slug = String(req.query.slug || "").trim();
+  const limit = Math.min(Math.max(Number(req.query.limit || 500), 1), 5000);
+  const from = String(req.query.from || "").trim();
+  const to = String(req.query.to || "").trim();
+
+  if (!slug) return res.status(400).json({ error: "Missing slug" });
+
+  let where = "slug = @slug";
+  const params = { slug, limit };
+
+  if (from) {
+    where += " AND ts >= @from";
+    params.from = from;
+  }
+  if (to) {
+    where += " AND ts <= @to";
+    params.to = to;
+  }
+
+  const rows = pmDb
+    .prepare(
+      `
+    SELECT ts, price, best_bid, best_ask, volume
+    FROM pm_snapshots
+    WHERE ${where}
+    ORDER BY ts DESC
+    LIMIT @limit
+  `
+    )
+    .all(params);
+
+  res.json({ rows });
+});
+
+// get one polymarket market by slug (metadata + raw fields)
+app.get("/api/pm/market", async (req, res) => {
+  try {
+    const slug = String(req.query.slug || "").trim();
+    if (!slug) return res.status(400).json({ error: "Missing slug" });
+
+    if (!polymarket.getMarketBySlug) {
+      return res.status(500).json({ error: "polymarket.getMarketBySlug not available" });
+    }
+
+    const m = await polymarket.getMarketBySlug(slug);
+    res.json(m);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+// collect ONE snapshot for a slug
+app.post("/api/collector/collect-one", async (req, res) => {
+  try {
+    const slug = String(req.body.slug || "").trim();
+    if (!slug) return res.status(400).json({ error: "Missing slug" });
+
+    const m = await polymarket.getMarketBySlug(slug);
+    if (!m) return res.status(404).json({ error: "Market not found" });
+
+    const r = m.raw || {};
+    const price = r.lastTradePrice != null ? Number(r.lastTradePrice) : null;
+    const bestBid = r.bestBid != null ? Number(r.bestBid) : null;
+    const bestAsk = r.bestAsk != null ? Number(r.bestAsk) : null;
+    const volume = r.volume != null ? Number(r.volume) : null;
+
+    pmDb.prepare(`
+      INSERT INTO pm_snapshots (slug, ts, price, best_bid, best_ask, volume, raw_json)
+      VALUES (?, datetime('now'), ?, ?, ?, ?, ?)
+    `).run(slug, price, bestBid, bestAsk, volume, JSON.stringify(m));
+
+    res.json({ ok: true, slug, price, ts: new Date().toISOString() });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+// -------------------------
+// 4) COLLECTOR (interval)
+// -------------------------
 let collectorState = {
   running: false,
   everySec: Number(process.env.PM_COLLECT_EVERY_SEC || 30),
   slugs: [],
   lastRun: null,
-  lastErrors: []
+  lastErrors: [],
 };
-
-app.get("/api/collector/status", (req, res) => {
-  // refresh slugs live from DB
-  const slugs = pmDb.prepare("SELECT slug FROM pm_markets WHERE active=1 ORDER BY updated_at DESC").all().map(r => r.slug);
-  collectorState.slugs = slugs;
-  res.json(collectorState);
-});
 
 let collectorTimer = null;
 
@@ -385,7 +379,7 @@ async function collectAllOnce() {
   const slugs = pmDb
     .prepare("SELECT slug FROM pm_markets WHERE active=1 ORDER BY updated_at DESC")
     .all()
-    .map(r => r.slug);
+    .map((r) => r.slug);
 
   collectorState.slugs = slugs;
   collectorState.lastRun = new Date().toISOString();
@@ -395,10 +389,10 @@ async function collectAllOnce() {
       const m = await polymarket.getMarketBySlug(slug);
       const r = m?.raw || {};
 
-      const price = (r.lastTradePrice != null ? Number(r.lastTradePrice) : null);
-      const bestBid = (r.bestBid != null ? Number(r.bestBid) : null);
-      const bestAsk = (r.bestAsk != null ? Number(r.bestAsk) : null);
-      const volume = (r.volume != null ? Number(r.volume) : null);
+      const price = r.lastTradePrice != null ? Number(r.lastTradePrice) : null;
+      const bestBid = r.bestBid != null ? Number(r.bestBid) : null;
+      const bestAsk = r.bestAsk != null ? Number(r.bestAsk) : null;
+      const volume = r.volume != null ? Number(r.volume) : null;
 
       pmDb.prepare(`
         INSERT INTO pm_snapshots (slug, ts, price, best_bid, best_ask, volume, raw_json)
@@ -415,19 +409,45 @@ async function collectAllOnce() {
   }
 }
 
+app.get("/api/collector/status", (req, res) => {
+  const slugs = pmDb
+    .prepare("SELECT slug FROM pm_markets WHERE active=1 ORDER BY updated_at DESC")
+    .all()
+    .map((r) => r.slug);
+
+  collectorState.slugs = slugs;
+  res.json(collectorState);
+});
+
 app.post("/api/collector/start", async (req, res) => {
   collectorState.everySec = Math.max(5, Number(req.body.everySec || collectorState.everySec || 30));
 
-  if (collectorTimer) {
-    collectorState.running = true;
-    return res.json({ ok: true, running: true, everySec: collectorState.everySec, note: "already running" });
+  // Optional: accept slugs from UI and persist them
+  const slugs = Array.isArray(req.body.slugs)
+    ? req.body.slugs.map((s) => String(s).trim()).filter(Boolean)
+    : [];
+
+  if (slugs.length) {
+    const upsert = pmDb.prepare(`
+      INSERT INTO pm_markets (slug, league, title, active, updated_at)
+      VALUES (@slug, @league, @title, 1, datetime('now'))
+      ON CONFLICT(slug) DO UPDATE SET
+        active=1,
+        updated_at=datetime('now')
+    `);
+
+    const tx = pmDb.transaction((items) => {
+      for (const slug of items) upsert.run({ slug, league: "NBA", title: "" });
+    });
+    tx(slugs);
   }
+
+  if (collectorTimer) clearInterval(collectorTimer);
+  collectorTimer = null;
 
   collectorState.running = true;
 
-  // run immediately once, then interval
   await collectAllOnce();
-
   collectorTimer = setInterval(() => {
     collectAllOnce().catch(() => {});
   }, collectorState.everySec * 1000);
@@ -442,47 +462,33 @@ app.post("/api/collector/stop", (req, res) => {
   res.json({ ok: true, running: false });
 });
 
+// (optional) auto-start after boot
 setTimeout(() => {
-  collectAllOnce().catch(() => {});
-  collectorTimer = setInterval(
-    () => collectAllOnce().catch(() => {}),
-    collectorState.everySec * 1000
-  );
+  if (collectorTimer) return;
   collectorState.running = true;
+  collectAllOnce().catch(() => {});
+  collectorTimer = setInterval(() => collectAllOnce().catch(() => {}), collectorState.everySec * 1000);
 }, 3000);
 
-
 // -------------------------
-// 4) IMPORTANT: API 404 MUST BE JSON (prevents HTML website fallback on /api/*)
+// 5) IMPORTANT: API 404 MUST BE JSON
 // -------------------------
 app.use("/api", (req, res) => {
   res.status(404).json({ error: "API route not found", path: req.originalUrl });
 });
 
-
-
 // -------------------------
-// 5) STATIC + SPA FALLBACK (LAST)
+// 6) STATIC + SPA FALLBACK (LAST)
 // -------------------------
-
-// Serve built frontend from /public (or any static assets you have there)
 app.use(express.static(path.join(__dirname, "public")));
-
-// If you have a single-page app build in /public, this ensures refresh works.
-// It will NOT affect /api/* because we handled /api above.
-// --- NBA PAGE (must be above SPA fallback) ---
-
-// --- NBA REACT (static build) ---
 app.use("/nba", express.static(path.join(__dirname, "nba_public"), { index: "index.html" }));
 
-// Polymarket SPA fallback (unchanged)
 app.get(/^(?!\/api).*/, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-
 // -------------------------
-// 6) LISTEN
+// 7) LISTEN
 // -------------------------
 const port = Number(process.env.PORT || 3001);
 app.listen(port, "0.0.0.0", () => {

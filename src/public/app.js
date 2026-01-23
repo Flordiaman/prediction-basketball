@@ -325,18 +325,6 @@ function drawCharts(rows){
 /* =========================
    DATA LOADERS
 ========================= */
-async function loadCollectorStatus(){
-  try {
-    const s = await apiGet("/api/collector/status");
-    setPill(Boolean(s.running));
-    qs("collectorMeta").textContent = `everySec=${s.everySec} • slugs=${(s.slugs||[]).length} • lastRun=${s.lastRun || "—"}`;
-    qs("collectorErrors").textContent = (s.lastErrors||[]).slice(0,3).map(e => `• ${e.ts} ${e.slug}: ${e.error}`).join("\n");
-  } catch(e){
-    setPill(false);
-    qs("collectorMeta").textContent = `Collector status error: ${e.message}`;
-  }
-}
-
 async function loadMarkets(){
   const q = qs("marketsSearch").value.trim();
   const league = qs("marketsLeague").value.trim();
@@ -353,193 +341,27 @@ async function loadMarkets(){
 
   const data = await apiGet(`/api/db/markets?${params.toString()}`);
   marketsCache = data.rows || [];
+
+  // render list
   renderMarkets(marketsCache);
 
+  // if nothing selected yet, auto-pick the first market
   if (!selectedSlug && marketsCache.length) {
     await selectMarket(marketsCache[0].slug);
-  } else {
-    renderMarkets(marketsCache);
-  }
-}
-
-function applyQuickRange(){
-  const mode = qs("quickRange").value;
-  const now = new Date();
-  let from = "";
-  let to = "";
-
-  if (mode === "24h") {
-    from = new Date(now.getTime() - 24*3600*1000).toISOString();
-    to = now.toISOString();
-  } else if (mode === "7d") {
-    from = new Date(now.getTime() - 7*24*3600*1000).toISOString();
-    to = now.toISOString();
-  } else if (mode === "30d") {
-    from = new Date(now.getTime() - 30*24*3600*1000).toISOString();
-    to = now.toISOString();
-  } else if (mode === "live") {
-    from = "";
-    to = "";
-  } else {
-    return;
+    return; // selectMarket already loads snapshots
   }
 
-  qs("snapFrom").value = from ? from.slice(0,16) : "";
-  qs("snapTo").value = to ? to.slice(0,16) : "";
-}
-
-async function loadSnapshots(){
-  if (!selectedSlug) return;
-
-  const limit = Number(qs("snapLimit").value || 500);
-  const fromIso = toIsoFromDatetimeLocal(qs("snapFrom").value);
-  const toIso = toIsoFromDatetimeLocal(qs("snapTo").value);
-
-  const params = new URLSearchParams();
-  params.set("slug", selectedSlug);
-  params.set("limit", String(limit));
-  if (fromIso) params.set("from", fromIso);
-  if (toIso) params.set("to", toIso);
-
-  const data = await apiGet(`/api/db/snapshots?${params.toString()}`);
-  renderSnapshots(data.rows || []);
+  // if a market is already selected, refresh snapshots
+  if (selectedSlug) {
+    await loadSnapshots();
+  }
 }
 
 async function selectMarket(slug){
+  selectedSlug = slug;      // ✅ THIS was missing / wrong before
   setSelectedUI(slug);
   renderMarkets(marketsCache);
-  await loadSnapshots();
+  await loadSnapshots();    // ✅ always load when user selects
 }
-
-/* =========================
-   EXPORT
-========================= */
-function exportSnapshotsCsv(){
-  const rows = Array.from(qs("snapTable").querySelectorAll("tbody tr")).map(tr =>
-    Array.from(tr.querySelectorAll("td")).map(td => td.textContent)
-  );
-  const header = Array.from(qs("snapTable").querySelectorAll("thead th")).map(th => th.textContent.replace(" ↑","").replace(" ↓",""));
-
-  const csv = [
-    header,
-    ...rows
-  ].map(line => line.map(v => `"${String(v).replaceAll('"','""')}"`).join(",")).join("\n");
-
-  const blob = new Blob([csv], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${selectedSlug || "snapshots"}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-/* =========================
-   COLLECTOR actions
-========================= */
-async function collectorStart(){
-  const slugs = parseSlugs(qs("collectorSlugs").value);
-  const everySec = Number(qs("collectorEverySec").value || 10);
-  const res = await apiPost("/api/collector/start", { slugs, everySec });
-  log("collector start:", res);
-  await loadCollectorStatus();
-}
-async function collectorStop(){
-  const res = await apiPost("/api/collector/stop", {});
-  log("collector stop:", res);
-  await loadCollectorStatus();
-}
-async function addSelectedToCollector(){
-  if (!selectedSlug) return;
-  const res = await apiPost("/api/collector/slugs/add", { slugs: [selectedSlug] });
-  log("collector add:", res);
-  await loadCollectorStatus();
-}
-async function removeSelectedFromCollector(){
-  if (!selectedSlug) return;
-  const res = await apiPost("/api/collector/slugs/remove", { slugs: [selectedSlug] });
-  log("collector remove:", res);
-  await loadCollectorStatus();
-}
-
-async function refreshAll(){
-  try {
-    await loadCollectorStatus();
-    await loadMarkets();
-    if (selectedSlug) await loadSnapshots();
-    log("refresh ok");
-  } catch(e){
-    log("refresh error:", e.message);
-  }
-}
-
-/* =========================
-   WIRE UI
-========================= */
-function wireEvents(){
-  qs("btnRefresh").addEventListener("click", refreshAll);
-
-  qs("btnCollectorStart").addEventListener("click", async () => {
-    try { await collectorStart(); } catch(e){ log("collectorStart error:", e.message); }
-  });
-
-  qs("btnCollectorStop").addEventListener("click", async () => {
-    try { await collectorStop(); } catch(e){ log("collectorStop error:", e.message); }
-  });
-
-  qs("btnAddSelectedToCollector").addEventListener("click", async () => {
-    try { await addSelectedToCollector(); } catch(e){ log("addSelected error:", e.message); }
-  });
-
-  qs("btnRemoveSelectedFromCollector").addEventListener("click", async () => {
-    try { await removeSelectedFromCollector(); } catch(e){ log("removeSelected error:", e.message); }
-  });
-
-  qs("btnLoadSnapshots").addEventListener("click", async () => {
-    try { await loadSnapshots(); } catch(e){ log("loadSnapshots error:", e.message); }
-  });
-
-  qs("btnExportCsv").addEventListener("click", exportSnapshotsCsv);
-
-  qs("quickRange").addEventListener("change", () => applyQuickRange());
-
-  ["marketsSearch","marketsLeague","marketsSort","marketsDir","marketsLimit"].forEach(id => {
-    qs(id).addEventListener("change", () => loadMarkets().catch(e => log("loadMarkets error:", e.message)));
-    qs(id).addEventListener("keyup", (ev) => {
-      if (id === "marketsSearch" && ev.key === "Enter") loadMarkets().catch(e => log("loadMarkets error:", e.message));
-    });
-  });
-
-  // library
-  const btnLibSave = qs("btnLibSave");
-  if (btnLibSave) {
-    btnLibSave.addEventListener("click", () => {
-      const slug = (qs("libSlug").value || "").trim();
-      if (!slug) return;
-      const arr = loadLib();
-      if (!arr.includes(slug)) arr.unshift(slug);
-      saveLib(arr.slice(0, 50));
-      qs("libSlug").value = "";
-      renderLib();
-      log("Saved slug to library:", slug);
-    });
-  }
-}
-
-/* =========================
-   BOOT
-========================= */
-(async function boot(){
-  wireEvents();
-  renderLib();
-  applyQuickRange();
-  markSortableHeaders();
-  await refreshAll();
-
-  setInterval(() => {
-    loadCollectorStatus().catch(()=>{});
-  }, 5000);
-})();
-
 
 
