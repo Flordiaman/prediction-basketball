@@ -1,3 +1,4 @@
+console.log("APP.JS LOADED", new Date().toISOString());
 const logEl = () => document.getElementById("log");
 function log(...args){
   const line = args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
