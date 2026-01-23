@@ -32,3 +32,8 @@ coverage/
 # src/nba_public/
 # allow the deployed NBA database
 !src/nba.sqlite
+polymarket.sqlite
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.env
