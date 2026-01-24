@@ -10,12 +10,69 @@ init();
 
 const polymarket = require("./polymarket");
 const { openNbaDb } = require("./nbaDb");
-const makeNbaRouter = require("./nbaRouter"); // ✅
+const makeNbaRouter = require("./nbaRouter");
 const { openPmDb } = require("./pmDb");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+function canonicalPrice(raw) {
+  const bid = raw?.bestBid != null ? Number(raw.bestBid) : null;
+  const ask = raw?.bestAsk != null ? Number(raw.bestAsk) : null;
+  const last = raw?.lastTradePrice != null ? Number(raw.lastTradePrice) : null;
+
+  const hasBid = bid != null && !Number.isNaN(bid);
+  const hasAsk = ask != null && !Number.isNaN(ask);
+
+  if (hasBid && hasAsk) return (bid + ask) / 2;
+  if (last != null && !Number.isNaN(last)) return last;
+  if (hasBid) return bid;
+  if (hasAsk) return ask;
+  return null;
+}
+
+
+// -------------------------
+// Helpers
+// -------------------------
+function bdlHeaders() {
+  const key = (process.env.BALLDONTLIE_API_KEY || "").trim();
+  if (!key) return {};
+  // Some providers accept either Authorization or X-API-Key; we send both.
+  return { Authorization: key, "X-API-Key": key };
+}
+
+function makeSeries(slug, points = 180) {
+  // deterministic pseudo-series per slug (stable line each refresh)
+  let seed = 0;
+  for (let i = 0; i < slug.length; i++) seed = (seed * 31 + slug.charCodeAt(i)) >>> 0;
+
+  function rand() {
+    // xorshift32
+    seed ^= seed << 13;
+    seed >>>= 0;
+    seed ^= seed >> 17;
+    seed >>>= 0;
+    seed ^= seed << 5;
+    seed >>>= 0;
+    return (seed >>> 0) / 4294967296;
+  }
+
+  const now = Date.now();
+  const stepMs = 60 * 1000; // 1 min spacing
+  let v = 0.52 + rand() * 0.08; // start around 0.52-0.60
+
+  const series = [];
+  for (let i = points - 1; i >= 0; i--) {
+    const t = new Date(now - i * stepMs).toISOString();
+    // gentle drift + noise
+    v += (rand() - 0.5) * 0.01 + 0.0005;
+    v = Math.max(0.01, Math.min(0.99, v));
+    series.push({ t, v: Number(v.toFixed(4)) });
+  }
+  return series;
+}
 
 // -------------------------
 // NBA (isolated)
@@ -60,12 +117,6 @@ app.get("/api/db/tables", (req, res) => {
 // -------------------------
 // 2) PLAYERS: IMPORT + SEARCH (DB-backed)
 // -------------------------
-function bdlHeaders() {
-  const key = (process.env.BALLDONTLIE_API_KEY || "").trim();
-  if (!key) return {};
-  return { Authorization: key, "X-API-Key": key };
-}
-
 app.post("/api/nba/db/players/import", async (req, res) => {
   try {
     const perPage = Math.min(Number(req.body.per_page || 100), 100);
@@ -212,7 +263,9 @@ app.post("/api/db/markets/save", (req, res) => {
 
   if (!slug) return res.status(400).json({ error: "Missing slug/id in body" });
 
-  pmDb.prepare(`
+  pmDb
+    .prepare(
+      `
     INSERT INTO pm_markets (slug, league, title, active, updated_at)
     VALUES (@slug, @league, @title, 1, datetime('now'))
     ON CONFLICT(slug) DO UPDATE SET
@@ -220,7 +273,9 @@ app.post("/api/db/markets/save", (req, res) => {
       title=excluded.title,
       active=1,
       updated_at=datetime('now')
-  `).run({ slug, league, title });
+  `
+    )
+    .run({ slug, league, title });
 
   res.json({ ok: true, slug, title, league });
 });
@@ -233,7 +288,9 @@ app.post("/api/db/markets", (req, res) => {
 
   if (!slug) return res.status(400).json({ error: "Missing slug" });
 
-  pmDb.prepare(`
+  pmDb
+    .prepare(
+      `
     INSERT INTO pm_markets (slug, league, title, active, updated_at)
     VALUES (@slug, @league, @title, 1, datetime('now'))
     ON CONFLICT(slug) DO UPDATE SET
@@ -241,7 +298,9 @@ app.post("/api/db/markets", (req, res) => {
       title=excluded.title,
       active=1,
       updated_at=datetime('now')
-  `).run({ slug, league, title });
+  `
+    )
+    .run({ slug, league, title });
 
   res.json({ ok: true, slug });
 });
@@ -340,23 +399,51 @@ app.get("/api/pm/market", async (req, res) => {
 app.post("/api/collector/collect-one", async (req, res) => {
   try {
     const slug = String(req.body.slug || "").trim();
-    if (!slug) return res.status(400).json({ error: "Missing slug" });
+    if (!slug) {
+      return res.status(400).json({ error: "Missing slug" });
+    }
 
     const m = await polymarket.getMarketBySlug(slug);
-    if (!m) return res.status(404).json({ error: "Market not found" });
+    if (!m) {
+      return res.status(404).json({ error: "Market not found" });
+    }
 
-    const r = m.raw || {};
-    const price = r.lastTradePrice != null ? Number(r.lastTradePrice) : null;
+    const r = m.raw ?? {};
+
+    const price = canonicalPrice(r);
     const bestBid = r.bestBid != null ? Number(r.bestBid) : null;
     const bestAsk = r.bestAsk != null ? Number(r.bestAsk) : null;
-    const volume = r.volume != null ? Number(r.volume) : null;
+    const volume  = r.volume  != null ? Number(r.volume)  : null;
+
+    const safe = (x) => (x == null || Number.isNaN(x) ? null : x);
 
     pmDb.prepare(`
-      INSERT INTO pm_snapshots (slug, ts, price, best_bid, best_ask, volume, raw_json)
+      INSERT INTO pm_snapshots (
+        slug,
+        ts,
+        price,
+        best_bid,
+        best_ask,
+        volume,
+        raw_json
+      )
       VALUES (?, datetime('now'), ?, ?, ?, ?, ?)
-    `).run(slug, price, bestBid, bestAsk, volume, JSON.stringify(m));
+    `).run(
+      slug,
+      safe(price),
+      safe(bestBid),
+      safe(bestAsk),
+      safe(volume),
+      JSON.stringify(m)
+    );
 
-    res.json({ ok: true, slug, price, ts: new Date().toISOString() });
+    res.json({
+      ok: true,
+      slug,
+      price: safe(price),
+      ts: new Date().toISOString(),
+    });
+
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) });
   }
@@ -389,15 +476,19 @@ async function collectAllOnce() {
       const m = await polymarket.getMarketBySlug(slug);
       const r = m?.raw || {};
 
-      const price = r.lastTradePrice != null ? Number(r.lastTradePrice) : null;
+      const price = canonicalPrice(r);
       const bestBid = r.bestBid != null ? Number(r.bestBid) : null;
       const bestAsk = r.bestAsk != null ? Number(r.bestAsk) : null;
       const volume = r.volume != null ? Number(r.volume) : null;
 
-      pmDb.prepare(`
+      pmDb
+        .prepare(
+          `
         INSERT INTO pm_snapshots (slug, ts, price, best_bid, best_ask, volume, raw_json)
         VALUES (?, datetime('now'), ?, ?, ?, ?, ?)
-      `).run(slug, price, bestBid, bestAsk, volume, JSON.stringify(m));
+      `
+        )
+        .run(slug, price, bestBid, bestAsk, volume, JSON.stringify(m));
     } catch (e) {
       collectorState.lastErrors.unshift({
         ts: new Date().toISOString(),
@@ -471,24 +562,136 @@ setTimeout(() => {
 }, 3000);
 
 // -------------------------
-// 5) IMPORTANT: API 404 MUST BE JSON
+// Narrative helpers (REAL snapshots if available, fallback otherwise)
 // -------------------------
-app.use("/api", (req, res) => {
-  res.status(404).json({ error: "API route not found", path: req.originalUrl });
+function seriesFromSnapshots(rows, points = 180) {
+  // rows expected newest-first OR any order; normalize oldest->newest
+  const sorted = [...rows].sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+
+  // Map ts -> ISO time, price -> v
+  const out = [];
+  for (const r of sorted) {
+    const t = new Date(r.ts).toISOString();
+    const v = r.price != null ? Number(r.price) : null;
+    if (v == null || Number.isNaN(v)) continue;
+    out.push({ t, v: Number(v.toFixed(4)) });
+  }
+
+  // If too many points, keep last N
+  if (out.length > points) return out.slice(out.length - points);
+  return out;
+}
+
+function lastN(arr, n) {
+  if (arr.length <= n) return arr;
+  return arr.slice(arr.length - n);
+}
+
+function computeTrend(series) {
+  if (!series || series.length < 10) return { dir: "flat", delta: 0 };
+  const first = series[0].v;
+  const last = series[series.length - 1].v;
+  const delta = last - first;
+
+  const eps = 0.01; // tune later
+  const dir = delta > eps ? "up" : delta < -eps ? "down" : "flat";
+  return { dir, delta: Number(delta.toFixed(4)) };
+}
+
+app.get("/api/narrative/:slug", (req, res) => {
+  const { slug } = req.params;
+
+  const points = Math.min(Math.max(Number(req.query.points || 180), 20), 2000);
+  const stepMs = 60_000;
+
+  // try real snapshots first
+  const rows = pmDb
+    .prepare(
+      `
+      SELECT ts, price, volume
+      FROM pm_snapshots
+      WHERE slug = ?
+      ORDER BY ts DESC
+      LIMIT ?
+    `
+    )
+    .all(slug, points);
+
+  const hasReal = Array.isArray(rows) && rows.length >= 10;
+
+  // price series
+  const priceSeries = hasReal
+    ? (function () {
+        const sorted = [...rows].sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+        const out = [];
+        for (const r of sorted) {
+          const v = r.price != null ? Number(r.price) : null;
+          if (v == null || Number.isNaN(v)) continue;
+          out.push({ t: new Date(r.ts).toISOString(), v: Number(v.toFixed(4)) });
+        }
+        return out.slice(Math.max(0, out.length - points));
+      })()
+    : makeSeries(slug, points);
+
+  // volume series (still synthetic unless you want real normalization)
+  const volumeSeries = hasReal ? makeSeries(`${slug}:vol`, points) : makeSeries(`${slug}:vol`, points);
+
+  // compute narrative from the SAME series we return
+  const trend = computeTrend(priceSeries);
+
+  const tone =
+    trend.dir === "up" ? "bullish" :
+    trend.dir === "down" ? "bearish" :
+    "neutral";
+
+  // keep confidence low when synthetic, higher when real
+  const confidence =
+    hasReal
+      ? (trend.dir === "flat" ? 0.35 : 0.55)
+      : (trend.dir === "flat" ? 0.12 : 0.18);
+
+  const verbal =
+    trend.dir === "up"
+      ? `Market behavior is tilting bullish for "${slug}".`
+      : trend.dir === "down"
+      ? `Market behavior is tilting bearish for "${slug}".`
+      : `Market behavior is currently neutral for "${slug}". No dominant pressure detected.`;
+
+  res.json({
+    slug,
+    asOf: new Date().toISOString(),
+    narrative: {
+      modeDefault: "verbal",
+      verbal,
+      visualHint: "Toggle to visual for structure.",
+      confidence: Number(confidence.toFixed(2)),
+      tone,
+    },
+    behavior: {
+      layers: [
+        {
+          id: "price",
+          label: "Price",
+          status: hasReal ? (trend.dir === "flat" ? "static" : "shifting") : "static",
+          summary: hasReal ? `Trend: ${trend.dir} (Δ=${trend.delta})` : "Not evaluated yet.",
+          metrics: hasReal ? { trendDir: trend.dir, delta: trend.delta } : {},
+        },
+        { id: "volume", label: "Volume", status: hasReal ? "building" : "static", summary: "Not evaluated yet.", metrics: {} },
+        { id: "news", label: "News", status: "static", summary: "Not evaluated yet.", metrics: {} },
+      ],
+      ruleVersion: "0.0.2",
+    },
+    series: {
+      meta: { points, stepMs, source: hasReal ? "pm_snapshots" : "synthetic" },
+      price: priceSeries,
+      volume: volumeSeries,
+    },
+    meta: { contractVersion: "1.0.0" },
+  });
 });
 
 // -------------------------
-// 6) STATIC + SPA FALLBACK (LAST)
-// -------------------------
-app.use(express.static(path.join(__dirname, "public")));
-app.use("/nba", express.static(path.join(__dirname, "nba_public"), { index: "index.html" }));
-
-app.get(/^(?!\/api).*/, (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
-// -------------------------
-// 7) LISTEN
+// 8) LISTEN
 // -------------------------
 const port = Number(process.env.PORT || 3001);
 app.listen(port, "0.0.0.0", () => {

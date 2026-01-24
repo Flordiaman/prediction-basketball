@@ -6,9 +6,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      // keeps existing behavior (polymarket still uses /api)
       "/api": {
-        target: "http://localhost:5174",
+        target: "http://localhost:3001",
         changeOrigin: true,
       },
     },
@@ -16,13 +15,10 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        // existing main app (DO NOT BREAK)
         main: resolve(__dirname, "index.html"),
-        // new NBA page
         nba: resolve(__dirname, "nba.html"),
+        slug: resolve(__dirname, "slug.html"),
       },
     },
   },
 });
-
-
