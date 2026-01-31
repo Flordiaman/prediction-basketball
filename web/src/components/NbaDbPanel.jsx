@@ -126,8 +126,10 @@ export default function NbaDbPanel() {
       const r = await fetch(url, { cache: "no-store" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
 
-      const data = await r.json();
-      setGames(normRows(data));
+        const data = await r.json();
+        const rows = Array.isArray(data) ? data : (data.rows || data.items || data.data || []);
+        setGames(rows.slice().sort((a,b)=>String(a.game_date).localeCompare(String(b.game_date))));
+
     } catch (e) {
       console.error("loadGames failed:", e);
       setGames([]);
