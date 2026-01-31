@@ -7,7 +7,6 @@ const styles = {
     width: "100%",
     maxWidth: 1100,
     margin: "0 auto",
-    padding: "22px 16px 40px",
       padding: "22px 16px 120px", // ⬅ extra bottom padding
   },
   title: { fontSize: 28, fontWeight: 900, marginBottom: 2 },

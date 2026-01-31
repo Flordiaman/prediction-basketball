@@ -97,9 +97,18 @@ export default function PlayerSearch({
     const t = setTimeout(async () => {
       try {
         const data = await searchPlayers(term);
-        if (cancelled) return;
+if (cancelled) return;
 
-        setRows(Array.isArray(data) ? data : []);
+// ✅ CORRECT
+const items =
+  Array.isArray(data) ? data :
+  Array.isArray(data.items) ? data.items :
+  Array.isArray(data.rows) ? data.rows :
+  Array.isArray(data.data) ? data.data :
+  [];
+
+setRows(items);
+
       } catch (e) {
         if (cancelled) return;
         setErr(e?.message || "Search failed");
