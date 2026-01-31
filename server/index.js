@@ -1,75 +1,98 @@
 /* ===============================
    server/index.js
-   CLEAN – API first, SPA last
+   CLEAN – Express 5 safe
    =============================== */
 
-const path = require("path");
-const fs = require("fs");
 const express = require("express");
-
-require("dotenv").config({ path: path.join(process.cwd(), ".env") });
+const path = require("path");
+const Database = require("better-sqlite3");
 
 const app = express();
+const PORT = process.env.PORT || 3001;
 
-app.disable("x-powered-by");
-app.use(express.json({ limit: "2mb" }));
-app.use(express.urlencoded({ extended: true }));
+/* ===============================
+   DATABASE
+   =============================== */
+const db = new Database("nba_history.sqlite");
 
-// -------------------------------
-// API routes (FIRST)
-// -------------------------------
-const nbaHistoryRouter = require("./routes/nbahistory");
+/* ===============================
+   MIDDLEWARE
+   =============================== */
+app.use(express.json());
 
-// Mount it under /api (and also /api/nba/history for clarity)
-
-app.use("/api/nba", nbaHistoryRouter);
-app.use("/api/nba/history", nbaHistoryRouter);
-
-app.get("/api/health", (req, res) => {
-  res.json({ ok: true, ts: new Date().toISOString() });
-});
-
-// Aliases to keep your front-end stable
-app.get("/api/nba/db/players/search", (req, res) => {
-  // forward to your existing players endpoint
-  // NOTE: adjust query param names if your /players expects different ones
-  req.url = "/players";
-  return nbaHistoryRouter(req, res, () => res.status(404).json({ ok: false, error: "No handler" }));
-});
-
-app.get("/api/nba/core/_debug/tables", (req, res) => {
-  // We'll implement this properly in nbahistory.js once we see DB path
-  res.json({ ok: true, note: "debug endpoint not implemented yet" });
-});
-
-
-// -------------------------------
-// Static + SPA (LAST)
-// -------------------------------
-const WEB_DIST = path.join(process.cwd(), "web", "dist");
-const INDEX_HTML = path.join(WEB_DIST, "index.html");
-
-if (fs.existsSync(WEB_DIST)) {
-  app.use(express.static(WEB_DIST));
-
-  // SPA fallback: anything except /api/*
-  app.get(/^\/(?!api\/).*/, (req, res) => {
-    res.sendFile(INDEX_HTML);
-  });
+/* ===============================
+   HELPERS
+   =============================== */
+function todayNY() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+  }).format(new Date());
 }
 
-// 404 for unknown API routes (keeps API from returning HTML)
-app.use("/api", (req, res) => {
-  res.status(404).json({ ok: false, error: "Not Found", path: req.originalUrl });
+function getTodayTeamGames(today) {
+  const rows = db
+    .prepare(`
+      SELECT *
+      FROM team_games
+      WHERE game_date = ?
+      ORDER BY game_id
+    `)
+    .all(today);
+
+  const grouped = {};
+  for (const r of rows) {
+    if (!grouped[r.game_id]) grouped[r.game_id] = [];
+    grouped[r.game_id].push(r);
+  }
+
+  return Object.values(grouped).filter((g) => g.length === 2);
+}
+
+/* ===============================
+   API ROUTES (ALWAYS FIRST)
+   =============================== */
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
 });
 
-app.use((err, req, res, next) => {
-  console.error("SERVER ERROR:", err);
-  res.status(500).json({ ok: false, error: "Server Error", message: err?.message || String(err) });
+app.get("/predict_today", (req, res) => {
+  try {
+    const today = todayNY();
+    const games = getTodayTeamGames(today);
+
+    res.json({
+      date: today,
+      count: games.length,
+      games: games.map(([a, b]) => ({
+        game_id: a.game_id,
+        home: a.home_away === "H" ? a : b,
+        away: a.home_away === "A" ? a : b,
+        source: "team_games",
+      })),
+    });
+  } catch (err) {
+    console.error("predict_today error:", err);
+    res.status(500).json({ error: "predict_today failed" });
+  }
 });
 
-const PORT = Number(process.env.PORT || 3001);
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`BLURIFT server listening on http://localhost:${PORT}`);
-  console.log(`Router: server/routes/nbahistory.js mounted at /api and /api/nba/history`);
+/* ===============================
+   STATIC FRONTEND + SPA FALLBACK
+   EXPRESS 5 SAFE (NO WILDCARDS)
+   =============================== */
+const webDir = path.join(__dirname, "..", "web", "dist");
+
+// Serve JS/CSS/assets
+app.use(express.static(webDir));
+
+// React Router fallback
+app.use((req, res) => {
+  res.sendFile(path.join(webDir, "index.html"));
+});
+
+/* ===============================
+   START SERVER
+   =============================== */
+app.listen(PORT, () => {
+  console.log(`🔥 Server running on http://localhost:${PORT}`);
 });

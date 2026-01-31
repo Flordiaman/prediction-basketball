@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "type": "commonjs",
   "scripts": {
-    "dev": "nodemon src/server.js",
-    "dev:web": "vite",
-    "start": "node src/server.js"
+    "server": "node src/server.js",
+    "server:index": "node server/index.js",
+    "dev": "npm run server",
+    "web": "npm --prefix web run dev"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",

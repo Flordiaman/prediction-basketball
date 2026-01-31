@@ -8,10 +8,11 @@ const fs = require("fs");
 
 const PORT = process.env.PORT || 3001;
 
-// NOTE: Main app DB from your db.js
+// Main app DB
 const { db, init, DB_PATH } = require("../db.js");
 init();
 
+// Local modules
 const polymarket = require("./polymarket");
 const { openNbaDb } = require("./nbaDb");
 const makeNbaRouter = require("./nbaRouter");
@@ -22,7 +23,7 @@ app.use(cors());
 app.use(express.json());
 
 /* ===============================
-   NBA SPEED BUILD ROUTES
+   NBA SPEED BUILD ROUTES (safe stubs)
    =============================== */
 
 app.get("/api/status", (req, res) => {
@@ -96,7 +97,6 @@ app.get("/api/nba/picks", (req, res) => {
     const absEdge = Math.abs(edge);
     const vol = typeof p.last10_std === "number" ? p.last10_std : 5.0;
     const snr = absEdge / (vol || 1);
-
     const confidence = Math.round(clamp((snr / 1.2) * 100, 0, 100));
 
     let tier = "PASS";
@@ -146,30 +146,31 @@ const nbaDirDist = path.join(__dirname, "..", "web", "dist");
 const nbaDirLocal = path.join(__dirname, "..", "web", "nba");
 const nbaDirOld = path.join(__dirname, "..", "web", "nba-old");
 
-function pickNbaDir() {
+const pickNbaDir = () => {
   if (fs.existsSync(path.join(nbaDirDist, "index.html"))) return nbaDirDist;
   if (fs.existsSync(path.join(nbaDirLocal, "index.html"))) return nbaDirLocal;
   if (fs.existsSync(path.join(nbaDirOld, "index.html"))) return nbaDirOld;
   return null;
-}
+};
 
 const nbaDir = pickNbaDir();
 
 if (nbaDir) {
   app.use("/nba", express.static(nbaDir));
 
+  // serve SPA shell for BOTH /nba and /nba/
   app.get(["/nba", "/nba/"], (req, res) => {
     res.sendFile(path.join(nbaDir, "index.html"));
   });
 
-  // SPA fallback under /nba (no extension)
+  // SPA fallback under /nba for non-file routes
   app.get(/^\/nba\/(?!.*\.[^/]+$).*/, (req, res) => {
     res.sendFile(path.join(nbaDir, "index.html"));
   });
 
   console.log("✅ Serving /nba from:", nbaDir);
 } else {
-  console.warn("⚠️ NBA not found: missing index.html in dist/nba, nba, and nba-old");
+  console.warn("⚠️ NBA not found: missing index.html in web/dist, web/nba, and web/nba-old");
 }
 
 /* ===============================
@@ -189,12 +190,6 @@ function canonicalPrice(raw) {
   if (hasBid) return bid;
   if (hasAsk) return ask;
   return null;
-}
-
-function bdlHeaders() {
-  const key = (process.env.BALLDONTLIE_API_KEY || "").trim();
-  if (!key) return {};
-  return { Authorization: key, "X-API-Key": key };
 }
 
 function makeSeries(slug, points = 180) {
@@ -225,44 +220,156 @@ function makeSeries(slug, points = 180) {
   return series;
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-async function fetchWith429Retry(url, opts, { maxRetries = 8, baseDelayMs = 1500 } = {}) {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const resp = await fetch(url, opts);
-    if (resp.status !== 429) return resp;
-
-    const ra = resp.headers.get("retry-after");
-    const retryAfterMs = ra ? Number(ra) * 1000 : null;
-
-    const backoff =
-      retryAfterMs != null && !Number.isNaN(retryAfterMs)
-        ? retryAfterMs
-        : baseDelayMs * Math.pow(2, attempt);
-
-    await sleep(Math.min(backoff, 30000));
-  }
-
-  return fetch(url, opts);
-}
-
 /* ===============================
-   NBA (isolated CSV → SQLite)
+   Open NBA DB + mount router
    =============================== */
 
 const nbaOpened = openNbaDb();
 const nbaDb = nbaOpened.db;
 
-app.use("/api/nba/core", makeNbaRouter(nbaDb, { NBA_DB_PATH: nbaOpened.NBA_DB_PATH }));
+// Existing router (keep it)
+app.use("/api/nba", makeNbaRouter(nbaDb, { NBA_DB_PATH: nbaOpened.NBA_DB_PATH }));
 
-try {
-  const nbaHistory = require("../server/routes/nbahistory");
-  app.use("/api/nba/history", nbaHistory);
-} catch (e) {
-  console.log("nbaHistory router not loaded:", e?.message || e);
-}
+/* ===============================
+   ADD: endpoints your React UI is calling
+   =============================== */
+
+// PlayerSearch is calling something like:
+// /api/nba/db/players/search?q=le&limit=25
+app.get("/api/nba/db/players/search", (req, res) => {
+  try {
+    // accept BOTH q and search
+    const qRaw = req.query.q ?? req.query.search ?? "";
+    const q = String(qRaw).trim().toLowerCase();
+
+    const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 200);
+
+    if (q.length < 2) return res.json({ ok: true, q, limit, items: [], rows: [] });
+
+    const cols = nbaDb.prepare("PRAGMA table_info(players)").all().map((c) => c.name);
+    const has = (name) => cols.includes(name);
+
+    const idCol = has("person_id") ? "person_id" : has("id") ? "id" : null;
+    const nameCol = has("person_name") ? "person_name" : has("full_name") ? "full_name" : has("name") ? "name" : null;
+
+    if (!idCol || !nameCol) {
+      return res.status(500).json({ ok: false, error: "players table missing expected columns", cols });
+    }
+
+    const items = nbaDb
+      .prepare(
+        `
+        SELECT
+          ${idCol} as id,
+          ${nameCol} as person_name
+        FROM players
+        WHERE lower(${nameCol}) LIKE ?
+        ORDER BY ${nameCol} ASC
+        LIMIT ?
+        `
+      )
+      .all(`%${q}%`, limit);
+
+    // return in multiple common shapes to satisfy any frontend
+    res.json({
+      ok: true,
+      q,
+      limit,
+      items,
+      rows: items,
+      data: items,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+
+app.get("/api/nba/db/player/:playerId", (req, res) => {
+  try {
+    const playerId = Number(req.params.playerId);
+    const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 200);
+    const season = req.query.season ? String(req.query.season).trim() : "";
+
+    if (!playerId) return res.status(400).json({ ok: false, error: "Bad playerId" });
+
+    // Introspect column names so we don't guess wrong
+    const bsCols = nbaDb.prepare("PRAGMA table_info(box_scores)").all().map((c) => c.name);
+    const gCols = nbaDb.prepare("PRAGMA table_info(games)").all().map((c) => c.name);
+
+    const hasBs = (n) => bsCols.includes(n);
+    const hasG = (n) => gCols.includes(n);
+
+    const bsPlayerId = hasBs("person_id") ? "person_id" : hasBs("player_id") ? "player_id" : null;
+    const bsGameId = hasBs("game_id") ? "game_id" : null;
+
+    const gGameId = hasG("game_id") ? "game_id" : null;
+    const gDate = hasG("game_date") ? "game_date" : hasG("date") ? "date" : null;
+    const gSeason = hasG("season") ? "season" : null;
+
+    if (!bsPlayerId || !bsGameId || !gGameId || !gDate) {
+      return res.status(500).json({
+        ok: false,
+        error: "Missing expected columns in box_scores/games",
+        box_scores_cols: bsCols,
+        games_cols: gCols,
+      });
+    }
+
+    // map stat columns with fallbacks
+    const col = (preferred, fallback) => (hasBs(preferred) ? preferred : hasBs(fallback) ? fallback : null);
+
+    const pts = col("pts", "points") || "0";
+    const reb = col("reb", "rebs") || "0";
+    const ast = col("ast", "assists") || "0";
+    const stl = col("stl", "steals") || "0";
+    const blk = col("blk", "blocks") || "0";
+    const tov = col("tov", "turnovers") || "0";
+    const pm = col("plus_minus", "plusMinus") || "0";
+
+    // optional team fields
+    const teamId = hasBs("team_id") ? "team_id" : null;
+    const teamAbbr = hasBs("team_abbreviation") ? "team_abbreviation" : hasBs("team_abbr") ? "team_abbr" : null;
+
+    let seasonWhere = "";
+    const params = [playerId];
+
+    if (season && gSeason) {
+      seasonWhere = ` AND g.${gSeason} = ? `;
+      params.push(Number(season));
+    }
+
+    params.push(limit);
+
+    const sql = `
+      SELECT
+        g.${gDate} as game_date,
+        b.${bsGameId} as game_id,
+        ${teamId ? `b.${teamId} as team_id,` : ""}
+        ${teamAbbr ? `b.${teamAbbr} as team_abbr,` : ""}
+        CAST(b.${pts} AS REAL) as pts,
+        CAST(b.${reb} AS REAL) as reb,
+        CAST(b.${ast} AS REAL) as ast,
+        CAST(b.${stl} AS REAL) as stl,
+        CAST(b.${blk} AS REAL) as blk,
+        CAST(b.${tov} AS REAL) as tov,
+        CAST(b.${pm} AS REAL) as plus_minus
+      FROM box_scores b
+      JOIN games g ON g.${gGameId} = b.${bsGameId}
+      WHERE b.${bsPlayerId} = ?
+      ${seasonWhere}
+      ORDER BY g.${gDate} DESC
+      LIMIT ?
+    `;
+
+    const rows = nbaDb.prepare(sql).all(...params);
+
+    res.json({ ok: true, playerId, limit, season: season || null, rows });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
 
 /* ===============================
    PM DB (markets + snapshots)
@@ -271,7 +378,7 @@ try {
 const pmDb = openPmDb();
 
 /* ===============================
-   Health + main DB debug
+   Health + DB debug
    =============================== */
 
 app.get("/health", (req, res) => res.json({ ok: true }));
@@ -285,78 +392,115 @@ app.get("/api/db/ping", (req, res) => {
   }
 });
 
+app.get("/api/db/tables", (req, res) => {
+  try {
+    const rows = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all();
+    res.json(rows.map((r) => r.name));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+app.get("/api/nba/_debug/tables", (req, res) => {
+  try {
+    const rows = nbaDb
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all();
+    res.json({
+      ok: true,
+      nbaDbPath: nbaOpened?.NBA_DB_PATH,
+      tables: rows.map((r) => r.name),
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
 /* ===============================
-   PM markets + snapshots
+   PM markets + snapshots endpoints
    =============================== */
 
-app.post("/api/db/markets/save", (req, res) => {
-  const m = req.body || {};
-  const slug = String(m.slug || m.marketSlug || m.id || "").trim();
-  const title = String(m.title || m.question || m.name || "").trim();
-  const league = String(m.league || m.category || "").trim();
+// list saved markets
+app.get("/api/db/markets", (req, res) => {
+  try {
+    const q = String(req.query.q || "").trim().toLowerCase();
+    const league = String(req.query.league || "").trim().toLowerCase();
+    const sort = String(req.query.sort || "updated_at");
+    const dir = String(req.query.dir || "desc").toLowerCase() === "asc" ? "ASC" : "DESC";
+    const limit = Math.min(Math.max(Number(req.query.limit || 200), 1), 1000);
 
-  if (!slug) return res.status(400).json({ error: "Missing slug/id in body" });
+    const sortCol = ["updated_at", "slug", "league", "title"].includes(sort) ? sort : "updated_at";
 
-  pmDb
-    .prepare(
-      `
-      INSERT INTO pm_markets (slug, league, title, active, updated_at)
-      VALUES (@slug, @league, @title, 1, datetime('now'))
-      ON CONFLICT(slug) DO UPDATE SET
-        league=excluded.league,
-        title=excluded.title,
-        active=1,
-        updated_at=datetime('now')
-    `
-    )
-    .run({ slug, league, title });
+    let where = "1=1";
+    const params = { limit };
 
-  res.json({ ok: true, slug, title, league });
+    if (q) {
+      where += " AND (lower(slug) LIKE @q OR lower(title) LIKE @q)";
+      params.q = `%${q}%`;
+    }
+    if (league) {
+      where += " AND lower(league) = @league";
+      params.league = league;
+    }
+
+    const rows = pmDb
+      .prepare(
+        `
+        SELECT slug, league, title, active, updated_at
+        FROM pm_markets
+        WHERE ${where}
+        ORDER BY ${sortCol} ${dir}
+        LIMIT @limit
+        `
+      )
+      .all(params);
+
+    res.json({ rows });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
 });
 
-app.post("/api/db/markets", (req, res) => {
-  const slug = String(req.body.slug || "").trim();
-  const league = String(req.body.league || "").trim();
-  const title = String(req.body.title || "").trim();
-
-  if (!slug) return res.status(400).json({ error: "Missing slug" });
-
-  pmDb
-    .prepare(
-      `
-      INSERT INTO pm_markets (slug, league, title, active, updated_at)
-      VALUES (@slug, @league, @title, 1, datetime('now'))
-      ON CONFLICT(slug) DO UPDATE SET
-        league=excluded.league,
-        title=excluded.title,
-        active=1,
-        updated_at=datetime('now')
-    `
-    )
-    .run({ slug, league, title });
-
-  res.json({ ok: true, slug });
-});
-
+// snapshots for a slug
 app.get("/api/db/snapshots", (req, res) => {
-  const slug = String(req.query.slug || "").trim();
-  const limit = Math.min(Math.max(Number(req.query.limit || 500), 1), 5000);
+  try {
+    const slug = String(req.query.slug || "").trim();
+    const limit = Math.min(Math.max(Number(req.query.limit || 500), 1), 5000);
+    const from = String(req.query.from || "").trim();
+    const to = String(req.query.to || "").trim();
 
-  if (!slug) return res.status(400).json({ error: "Missing slug" });
+    if (!slug) return res.status(400).json({ error: "Missing slug" });
 
-  const rows = pmDb
-    .prepare(
-      `
-      SELECT ts, price, best_bid, best_ask, volume
-      FROM pm_snapshots
-      WHERE slug = ?
-      ORDER BY ts DESC
-      LIMIT ?
-    `
-    )
-    .all(slug, limit);
+    let where = "slug = @slug";
+    const params = { slug, limit };
 
-  res.json({ rows });
+    if (from) {
+      where += " AND ts >= @from";
+      params.from = from;
+    }
+    if (to) {
+      where += " AND ts <= @to";
+      params.to = to;
+    }
+
+    const rows = pmDb
+      .prepare(
+        `
+        SELECT ts, price, best_bid, best_ask, volume
+        FROM pm_snapshots
+        WHERE ${where}
+        ORDER BY ts DESC
+        LIMIT @limit
+        `
+      )
+      .all(params);
+
+    res.json({ rows });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
 });
 
 /* ===============================
@@ -367,11 +511,9 @@ app.get("/api/pm/market", async (req, res) => {
   try {
     const slug = String(req.query.slug || "").trim();
     if (!slug) return res.status(400).json({ error: "Missing slug" });
-
     if (!polymarket.getMarketBySlug) {
       return res.status(500).json({ error: "polymarket.getMarketBySlug not available" });
     }
-
     const m = await polymarket.getMarketBySlug(slug);
     res.json(m);
   } catch (e) {
@@ -379,6 +521,7 @@ app.get("/api/pm/market", async (req, res) => {
   }
 });
 
+// collect ONE snapshot for a slug
 app.post("/api/collector/collect-one", async (req, res) => {
   try {
     const slug = String(req.body.slug || "").trim();
@@ -388,7 +531,6 @@ app.post("/api/collector/collect-one", async (req, res) => {
     if (!m) return res.status(404).json({ error: "Market not found" });
 
     const r = m.raw ?? {};
-
     const price = canonicalPrice(r);
     const bestBid = r.bestBid != null ? Number(r.bestBid) : null;
     const bestAsk = r.bestAsk != null ? Number(r.bestAsk) : null;
@@ -399,11 +541,9 @@ app.post("/api/collector/collect-one", async (req, res) => {
     pmDb
       .prepare(
         `
-        INSERT INTO pm_snapshots (
-          slug, ts, price, best_bid, best_ask, volume, raw_json
-        )
+        INSERT INTO pm_snapshots (slug, ts, price, best_bid, best_ask, volume, raw_json)
         VALUES (?, datetime('now'), ?, ?, ?, ?, ?)
-      `
+        `
       )
       .run(slug, safe(price), safe(bestBid), safe(bestAsk), safe(volume), JSON.stringify(m));
 
@@ -448,7 +588,7 @@ async function collectAllOnce() {
           `
           INSERT INTO pm_snapshots (slug, ts, price, best_bid, best_ask, volume, raw_json)
           VALUES (?, datetime('now'), ?, ?, ?, ?, ?)
-        `
+          `
         )
         .run(slug, price, bestBid, bestAsk, volume, JSON.stringify(m));
     } catch (e) {
@@ -462,38 +602,10 @@ async function collectAllOnce() {
   }
 }
 
-app.get("/api/collector/status", (req, res) => {
-  const slugs = pmDb
-    .prepare("SELECT slug FROM pm_markets WHERE active=1 ORDER BY updated_at DESC")
-    .all()
-    .map((r) => r.slug);
-
-  collectorState.slugs = slugs;
-  res.json(collectorState);
-});
+app.get("/api/collector/status", (req, res) => res.json(collectorState));
 
 app.post("/api/collector/start", async (req, res) => {
   collectorState.everySec = Math.max(5, Number(req.body.everySec || collectorState.everySec || 30));
-
-  const slugs = Array.isArray(req.body.slugs)
-    ? req.body.slugs.map((s) => String(s).trim()).filter(Boolean)
-    : [];
-
-  if (slugs.length) {
-    const upsert = pmDb.prepare(`
-      INSERT INTO pm_markets (slug, league, title, active, updated_at)
-      VALUES (@slug, @league, @title, 1, datetime('now'))
-      ON CONFLICT(slug) DO UPDATE SET
-        active=1,
-        updated_at=datetime('now')
-    `);
-
-    const tx = pmDb.transaction((items) => {
-      for (const slug of items) upsert.run({ slug, league: "NBA", title: "" });
-    });
-
-    tx(slugs);
-  }
 
   if (collectorTimer) clearInterval(collectorTimer);
   collectorTimer = null;
@@ -515,25 +627,16 @@ app.post("/api/collector/stop", (req, res) => {
   res.json({ ok: true, running: false });
 });
 
-// optional auto-start
-setTimeout(() => {
-  if (collectorTimer) return;
-  collectorState.running = true;
-  collectAllOnce().catch(() => {});
-  collectorTimer = setInterval(
-    () => collectAllOnce().catch(() => {}),
-    collectorState.everySec * 1000
-  );
-}, 3000);
-
 /* ===============================
    Narrative helpers
    =============================== */
 
 function computeTrend(series) {
   if (!series || series.length < 10) return { dir: "flat", delta: 0 };
-  const first = series[0].v;
-  const last = series[series.length - 1].v;
+  const first = Number(series[0].v);
+  const last = Number(series[series.length - 1].v);
+  if (!isFinite(first) || !isFinite(last)) return { dir: "flat", delta: 0 };
+
   const delta = last - first;
   const eps = 0.01;
   const dir = delta > eps ? "up" : delta < -eps ? "down" : "flat";
@@ -586,7 +689,7 @@ app.get("/api/narrative/:slug", (req, res) => {
         WHERE slug = ?
         ORDER BY ts DESC
         LIMIT ?
-      `
+        `
       )
       .all(slug, points);
 
@@ -608,20 +711,25 @@ app.get("/api/narrative/:slug", (req, res) => {
         })()
       : makeSeries(slug, points);
 
-    // ✅ data-present flag (works for real OR synthetic)
     const hasData = Array.isArray(priceSeries) && priceSeries.length >= 10;
+
+    const volumeSeries = makeSeries(`${slug}:vol`, points);
 
     const latestPrice = priceSeries.length ? Number(priceSeries[priceSeries.length - 1].v) : null;
     const changePct = pctChange(priceSeries);
     const volatility = computeVolatility(priceSeries);
 
-    const volumeSeries = makeSeries(`${slug}:vol`, points);
-
     const trend = computeTrend(priceSeries);
-    const trendLabel = trend.dir === "up" ? "up" : trend.dir === "down" ? "down" : "flat";
-
     const tone = trend.dir === "up" ? "bullish" : trend.dir === "down" ? "bearish" : "neutral";
-    const confidence = hasReal ? (trend.dir === "flat" ? 0.35 : 0.55) : trend.dir === "flat" ? 0.12 : 0.18;
+    const confidence = hasReal
+      ? trend.dir === "flat"
+        ? 0.35
+        : 0.55
+      : trend.dir === "flat"
+      ? 0.12
+      : 0.18;
+
+    const trendLabel = trend.dir === "up" ? "up" : trend.dir === "down" ? "down" : "flat";
 
     const verbal =
       trend.dir === "up"
@@ -630,7 +738,7 @@ app.get("/api/narrative/:slug", (req, res) => {
         ? `Market behavior is tilting bearish for "${slug}".`
         : `Market behavior is currently neutral for "${slug}". No dominant pressure detected.`;
 
-    res.json({
+    return res.json({
       slug,
       asOf: new Date().toISOString(),
       narrative: {
@@ -639,7 +747,6 @@ app.get("/api/narrative/:slug", (req, res) => {
         visualHint: "Toggle to visual for structure.",
         confidence: Number(confidence.toFixed(2)),
         tone,
-
         trend: trendLabel,
         changePct: Number(changePct.toFixed(4)),
         latestPrice: latestPrice != null ? Number(latestPrice.toFixed(4)) : null,
@@ -684,11 +791,19 @@ app.get("/api/narrative/:slug", (req, res) => {
     });
   } catch (err) {
     console.error("❌ /api/narrative error:", err);
-    res.status(500).json({
+    return res.status(500).json({
       error: err?.message || String(err),
       stack: err?.stack || null,
     });
   }
+});
+
+/* ===============================
+   API 404 guard (prevents HTML for /api mistakes)
+   =============================== */
+
+app.use("/api", (req, res) => {
+  res.status(404).json({ error: "Unknown API route", path: req.originalUrl });
 });
 
 /* ===============================
@@ -701,7 +816,7 @@ const webIndex = path.join(webDistDir, "index.html");
 if (fs.existsSync(webIndex)) {
   app.use(express.static(webDistDir));
 
-  // SAFE SPA fallback: matches anything NOT starting with /api/
+  // SPA fallback: match anything NOT starting with /api/
   app.get(/^(?!\/api\/).*/, (req, res) => {
     res.sendFile(webIndex);
   });
