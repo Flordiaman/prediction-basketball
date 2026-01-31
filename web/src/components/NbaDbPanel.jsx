@@ -1,261 +1,257 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import PlayerSearch from "./PlayerSearch";
 
-const API_BASE = ""; // keep blank for Render + same-origin
+
+const styles = {
+  pageWrap: {
+    width: "100%",
+    maxWidth: 1100,
+    margin: "0 auto",
+    padding: "22px 16px 40px",
+      padding: "22px 16px 120px", // ⬅ extra bottom padding
+  },
+  title: { fontSize: 28, fontWeight: 900, marginBottom: 2 },
+  sub: { opacity: 0.8, marginBottom: 16 },
+
+  glass: {
+    borderRadius: 22,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(0,0,0,0.18)",
+    boxShadow: "0 24px 70px rgba(0,0,0,0.40)",
+    backdropFilter: "blur(12px)",
+    padding: 18,
+  },
+
+  grid: { display: "grid", gap: 14 },
+
+  topRow: {
+    display: "flex",
+    gap: 12,
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  btn: {
+    padding: "10px 12px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.06)",
+    color: "rgba(255,255,255,0.92)",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+
+  input: {
+    padding: "10px 12px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(0,0,0,0.18)",
+    color: "rgba(255,255,255,0.92)",
+    outline: "none",
+    width: 200,
+  },
+
+  err: {
+    marginTop: 10,
+    padding: "10px 12px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255, 80, 80, 0.12)",
+    color: "rgba(255,255,255,0.92)",
+    fontSize: 13,
+  },
+
+  sectionTitle: { fontWeight: 900, marginTop: 6, marginBottom: 8 },
+
+  tableWrap: {
+    borderRadius: 16,
+    border: "1px solid rgba(255,255,255,0.10)",
+    overflow: "auto",
+    background: "rgba(0,0,0,0.12)",
+     maxHeight: "60vh", // <-- ADD THIS
+  },
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
+  th: {
+    textAlign: "left",
+    padding: "10px",
+    borderBottom: "1px solid rgba(255,255,255,0.10)",
+    opacity: 0.85,
+    whiteSpace: "nowrap",
+  },
+  td: {
+    padding: "9px 10px",
+    borderBottom: "1px solid rgba(255,255,255,0.06)",
+    whiteSpace: "nowrap",
+  },
+};
+
+function normRows(rows) {
+  const arr = Array.isArray(rows) ? rows : [];
+  return arr.map((g) => ({
+    game_date: g.game_date,
+    team_tricode: g.team_tricode,
+    pts: g.pts,
+    reb: g.reb,
+    ast: g.ast,
+    stl: g.stl,
+    blk: g.blk,
+    tov: g.tov,
+    plus_minus: g.plus_minus,
+  }));
+}
 
 export default function NbaDbPanel() {
-  const [selected, setSelected] = useState(null);
-  const [season, setSeason] = useState("");
+  const [selected, setSelected] = useState(null); // { id?, person_id?, person_name }
+  const [seasonYear, setSeasonYear] = useState("");
   const [games, setGames] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState("");
+  const [loadingGames, setLoadingGames] = useState(false);
+  const [errGames, setErrGames] = useState("");
 
-  async function loadPlayer(person) {
-    if (!person?.person_id) return;
+  const playerName = selected?.person_name || "Pick a player";
+  const playerId = selected?.id ?? selected?.person_id;
+  const canLoad = Boolean(playerId);
 
-    setSelected(person);
-    setLoading(true);
-    setErr("");
+  async function loadGames() {
+    if (!playerId) return;
+
+    setLoadingGames(true);
+    setErrGames("");
 
     try {
-      const url =
-        `${API_BASE}/api/nba/db/player/${person.person_id}?limit=25` +
-        (season ? `&season=${encodeURIComponent(season)}` : "");
+      const qs = new URLSearchParams();
+      qs.set("limit", "25");
+      if (seasonYear.trim()) qs.set("season", seasonYear.trim());
 
-      const r = await fetch(url);
+      const url = `/api/nba/db/player/${playerId}?${qs.toString()}`;
+      const r = await fetch(url, { cache: "no-store" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
 
       const data = await r.json();
-      setGames(Array.isArray(data) ? data : []);
+      setGames(normRows(data));
     } catch (e) {
-      setErr("Player game load failed");
+      console.error("loadGames failed:", e);
       setGames([]);
+      setErrGames("Player game load failed");
     } finally {
-      setLoading(false);
+      setLoadingGames(false);
     }
   }
 
-  const selectedName =
-    selected?.display_first_last ||
-    selected?.person_name ||
-    `${selected?.first_name ?? ""} ${selected?.last_name ?? ""}`.trim() ||
-    "";
+  // auto-load when player or season changes
+  useEffect(() => {
+    if (!playerId) return;
+    loadGames();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerId, seasonYear]);
+
+  const headerRight = useMemo(() => (
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+      <input
+        style={styles.input}
+        value={seasonYear}
+        onChange={(e) => setSeasonYear(e.target.value)}
+        placeholder="Season year (optional)"
+      />
+      <button style={styles.btn} onClick={loadGames} disabled={!canLoad || loadingGames}>
+        {loadingGames ? "Loading..." : "Reload"}
+      </button>
+    </div>
+  ), [seasonYear, canLoad, loadingGames]);
 
   return (
-    <div style={S.panel}>
-      <div style={S.headerRow}>
-        <div style={S.title}>NBA DB (2010–2024)</div>
-        <div style={S.subTitle}>Search players + view last 25 games</div>
-      </div>
+    <div style={styles.pageWrap}>
+      <div style={styles.title}>Blurift — NBA</div>
+      <div style={styles.sub}>Player search + last games + trends (scalable foundation)</div>
 
-      {/* ONE search box only */}
-      <PlayerSearch
-        onSelectPlayer={(p) => {
-          loadPlayer(p);
-        }}
-      />
-
-      <div style={S.controlsRow}>
-        <input
-          value={season}
-          onChange={(e) => setSeason(e.target.value)}
-          placeholder="Season year (optional)"
-          style={S.input}
-        />
-
-        {selected ? (
-          <>
-            <button
-              onClick={() => loadPlayer(selected)}
-              disabled={loading}
-              style={{
-                ...S.button,
-                opacity: loading ? 0.6 : 1,
-                cursor: loading ? "not-allowed" : "pointer",
-              }}
-            >
-              {loading ? "Loading..." : "Reload"}
-            </button>
-
-            <button
-              onClick={() => {
-                setSelected(null);
-                setGames([]);
-                setErr("");
-              }}
-              style={S.buttonGhost}
-            >
-              Change Player
-            </button>
-          </>
-        ) : (
-          <div style={S.muted}>Pick a player above.</div>
-        )}
-      </div>
-
-      {err ? <div style={S.error}>{err}</div> : null}
-
-      {selected ? (
-        <div style={{ marginTop: 12 }}>
-          <div style={S.selectedRow}>
-            <div style={S.selectedName}>
-              {selectedName} <span style={S.selectedId}>#{selected.person_id}</span>
+      <div style={styles.glass}>
+        <div style={styles.grid}>
+          <div style={styles.topRow}>
+            <div style={{ fontWeight: 900 }}>NBA DB (2010–2024)</div>
+            <div style={{ opacity: 0.8, fontSize: 13 }}>
+              Search players + view last 25 games
             </div>
           </div>
 
-          <div style={S.tableWrap}>
-            <div style={S.tableTitle}>Last games (max 25)</div>
+          <PlayerSearch
+            onSelectPlayer={(p) => {
+              setSelected(p);
+              setErrGames("");
+              setGames([]);
+            }}
+          />
 
-            <div style={{ overflowX: "auto" }}>
-              <table style={S.table}>
+          <div style={styles.topRow}>
+            {headerRight}
+            <div style={{ fontSize: 13, opacity: 0.85 }}>
+              Selected: <strong>{playerName}</strong>
+              {playerId ? <span style={{ opacity: 0.7 }}> #{playerId}</span> : null}
+            </div>
+          </div>
+
+          {errGames && <div style={styles.err}>{errGames}</div>}
+
+          {/*games.length > 0 && <PlayerTrends games={games} />*/}
+
+          <div>
+            <div style={styles.sectionTitle}>Last games (max 25)</div>
+            <div style={styles.tableWrap}>
+              <table style={styles.table}>
                 <thead>
                   <tr>
-                    <th style={S.thLeft}>Date</th>
-                    <th style={S.thLeft}>Type</th>
-                    <th style={S.thLeft}>Team</th>
-                    <th style={S.thRight}>PTS</th>
-                    <th style={S.thRight}>REB</th>
-                    <th style={S.thRight}>AST</th>
-                    <th style={S.thRight}>STL</th>
-                    <th style={S.thRight}>BLK</th>
-                    <th style={S.thRight}>TOV</th>
-                    <th style={S.thRight}>+/-</th>
+                    <th style={styles.th}>Date</th>
+                    <th style={styles.th}>Team</th>
+                    <th style={styles.th}>PTS</th>
+                    <th style={styles.th}>REB</th>
+                    <th style={styles.th}>AST</th>
+                    <th style={styles.th}>STL</th>
+                    <th style={styles.th}>BLK</th>
+                    <th style={styles.th}>TOV</th>
+                    <th style={styles.th}>+/-</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {games.map((g) => (
-                    <tr key={`${g.game_id}-${g.game_date}`} style={S.tr}>
-                      <td style={S.tdLeft}>{String(g.game_date).slice(0, 10)}</td>
-                      <td style={S.tdLeft}>{g.season_type}</td>
-                      <td style={S.tdLeft}>{g.team_tricode || g.team_id}</td>
-                      <td style={S.tdRight}>{g.pts ?? ""}</td>
-                      <td style={S.tdRight}>{g.reb ?? ""}</td>
-                      <td style={S.tdRight}>{g.ast ?? ""}</td>
-                      <td style={S.tdRight}>{g.stl ?? ""}</td>
-                      <td style={S.tdRight}>{g.blk ?? ""}</td>
-                      <td style={S.tdRight}>{g.tov ?? ""}</td>
-                      <td style={S.tdRight}>{g.plus_minus ?? ""}</td>
-                    </tr>
-                  ))}
-
                   {games.length === 0 ? (
                     <tr>
-                      <td style={S.tdEmpty} colSpan={10}>
-                        No games loaded yet.
+                      <td style={styles.td} colSpan={9}>
+                        {canLoad
+                          ? loadingGames
+                            ? "Loading..."
+                            : "No games loaded yet."
+                          : "Pick a player above."}
                       </td>
                     </tr>
-                  ) : null}
+                  ) : (
+                    games
+                      .slice()
+                      .sort((a, b) =>
+                        String(b.game_date).localeCompare(String(a.game_date))
+                      )
+                      .map((g, idx) => (
+                        <tr key={`${g.game_date}-${idx}`}>
+                          <td style={styles.td}>{String(g.game_date || "").slice(0, 10)}</td>
+                          <td style={styles.td}>{g.team_tricode || ""}</td>
+                          <td style={styles.td}>{g.pts}</td>
+                          <td style={styles.td}>{g.reb}</td>
+                          <td style={styles.td}>{g.ast}</td>
+                          <td style={styles.td}>{g.stl}</td>
+                          <td style={styles.td}>{g.blk}</td>
+                          <td style={styles.td}>{g.tov}</td>
+                          <td style={styles.td}>{g.plus_minus}</td>
+                        </tr>
+                      ))
+                  )}
                 </tbody>
               </table>
             </div>
           </div>
+
+          <div style={{ opacity: 0.75, fontSize: 12 }}>
+            Next upgrades: minutes-adjusted trends, opponent strength, rolling averages,
+            player-vs-player overlays, team splits, and behavior narrative.
+          </div>
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }
-
-const S = {
-  // Force readable colors regardless of global theme
-  panel: {
-    padding: 14,
-    border: "1px solid #e5e7eb",
-    borderRadius: 14,
-    background: "#ffffff",
-    color: "#111827",
-  },
-  headerRow: {
-    display: "flex",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    marginBottom: 10,
-    gap: 12,
-  },
-  title: { fontSize: 14, fontWeight: 900 },
-  subTitle: { fontSize: 12, color: "#6b7280" },
-
-  controlsRow: { display: "flex", gap: 8, alignItems: "center" },
-  input: {
-    width: 190,
-    padding: "10px 12px",
-    borderRadius: 10,
-    border: "1px solid #d1d5db",
-    background: "#ffffff",
-    color: "#111827",
-    outline: "none",
-  },
-
-  button: {
-    padding: "10px 12px",
-    borderRadius: 10,
-    border: "1px solid #d1d5db",
-    background: "#f9fafb",
-    color: "#111827",
-    fontWeight: 800,
-  },
-  buttonGhost: {
-    padding: "10px 12px",
-    borderRadius: 10,
-    border: "1px solid #d1d5db",
-    background: "#ffffff",
-    color: "#111827",
-    fontWeight: 800,
-    marginLeft: "auto",
-    cursor: "pointer",
-  },
-
-  muted: { fontSize: 12, color: "#6b7280" },
-  error: { marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: 700 },
-
-  selectedRow: { marginTop: 10, marginBottom: 8 },
-  selectedName: { fontSize: 14, fontWeight: 900 },
-  selectedId: { fontSize: 12, color: "#6b7280", fontWeight: 800 },
-
-  tableWrap: {
-    marginTop: 10,
-    border: "1px solid #e5e7eb",
-    borderRadius: 12,
-    overflow: "hidden",
-    background: "#ffffff",
-  },
-  tableTitle: {
-    padding: "10px 12px",
-    borderBottom: "1px solid #e5e7eb",
-    fontSize: 12,
-    fontWeight: 900,
-    color: "#111827",
-    background: "#f9fafb",
-  },
-  table: { width: "100%", borderCollapse: "collapse" },
-
-  thLeft: {
-    textAlign: "left",
-    padding: 10,
-    fontSize: 12,
-    color: "#374151",
-    background: "#ffffff",
-    borderBottom: "1px solid #e5e7eb",
-    whiteSpace: "nowrap",
-  },
-  thRight: {
-    textAlign: "right",
-    padding: 10,
-    fontSize: 12,
-    color: "#374151",
-    background: "#ffffff",
-    borderBottom: "1px solid #e5e7eb",
-    whiteSpace: "nowrap",
-  },
-
-  tr: { borderBottom: "1px solid #f3f4f6" },
-
-  tdLeft: { padding: 10, fontSize: 12, color: "#111827", whiteSpace: "nowrap" },
-  tdRight: {
-    padding: 10,
-    fontSize: 12,
-    color: "#111827",
-    textAlign: "right",
-    whiteSpace: "nowrap",
-  },
-  tdEmpty: { padding: 12, fontSize: 12, color: "#6b7280" },
-};

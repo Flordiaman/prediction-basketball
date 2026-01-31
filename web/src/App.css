@@ -324,7 +324,7 @@ html, body, #root {
 .game-card .sub {
   color: rgba(255,255,255,0.70) !important;
 }
-.game-card { outline: 4px solid hotpink !important; }
+
 @media (max-width: 768px) {
   .game-card {
     background: rgba(20, 25, 40, 0.92) !important;

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Blurift — Predict Today</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background:#0b0e14; color:#eaeaea; margin:0; padding:24px; }
+    h1 { font-size:28px; margin:0 0 6px 0; }
+    .sub { opacity:.7; margin-bottom:18px; }
+    .game { background:#111522; border:1px solid #222; border-radius:10px; padding:16px; margin-bottom:12px; }
+    .row { display:flex; justify-content:space-between; gap:12px; margin:6px 0; font-size:18px; }
+    .label { font-weight:700; }
+    .meta { font-size:12px; opacity:.65; margin-top:8px; }
+    .err { color:#ffb3b3; }
+  </style>
+</head>
+<body>
+  <h1>🏀 Blurift — Today’s Games</h1>
+  <div class="sub" id="subtitle">Loading…</div>
+  <div id="games"></div>
+
+  <script>
+    async function loadGames() {
+      const sub = document.getElementById("subtitle");
+      const root = document.getElementById("games");
+
+      try {
+        const res = await fetch("/predict_today", { cache: "no-store" });
+        const text = await res.text();
+
+        // If the server ever returns HTML by accident, show it clearly
+        if (!text.trim().startsWith("{")) {
+          sub.innerHTML = '<span class="err">Expected JSON, got something else.</span>';
+          root.textContent = text.slice(0, 300);
+          return;
+        }
+
+        const data = JSON.parse(text);
+
+        sub.textContent = `${data.count} games · ${data.date}`;
+        root.innerHTML = "";
+
+        if (!data.games || !data.games.length) {
+          root.textContent = "No games found.";
+          return;
+        }
+
+        data.games.forEach(g => {
+          const div = document.createElement("div");
+          div.className = "game";
+
+          const homeScore = (g.home && (g.home.team_score ?? g.home.teamScore)) ?? "-";
+          const awayScore = (g.away && (g.away.team_score ?? g.away.teamScore)) ?? "-";
+
+          div.innerHTML = `
+            <div class="row"><span class="label">Home</span><span>${homeScore} (team ${g.home.team_id})</span></div>
+            <div class="row"><span class="label">Away</span><span>${awayScore} (team ${g.away.team_id})</span></div>
+            <div class="meta">Game ID: ${g.game_id} · source: ${g.source}</div>
+          `;
+
+          root.appendChild(div);
+        });
+      } catch (e) {
+        console.error(e);
+        sub.innerHTML = '<span class="err">Failed to load games.</span>';
+        root.textContent = String(e);
+      }
+    }
+
+    loadGames();
+  </script>
+</body>
+</html>

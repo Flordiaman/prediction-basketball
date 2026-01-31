@@ -1,9 +1,10 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <base href="/nba/" />
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-    <title>NBA Stats</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Blurift — NBA</title>
   </head>
   <body>
     <div id="root"></div>

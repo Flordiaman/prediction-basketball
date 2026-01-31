@@ -1,54 +1,90 @@
-/* web/src/index.css — clean, dark, no Vite leftovers */
+/* web/src/index.css */
 
 :root {
   color-scheme: dark;
-  background-color: #0b1220;
-  color: rgba(255,255,255,0.92);
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
 }
 
+/* Kill horizontal scroll globally (this is what we want) */
 html, body {
+  width: 100%;
+  max-width: 100%;
   height: 100%;
   margin: 0;
-  background-color: #0b1220;
-  color: rgba(255,255,255,0.92);
+
+  /* lock the page scroll */
+  overflow: hidden;
+
+  /* keep killing horizontal scroll */
+  overflow-x: hidden !important;
 }
 
 #root {
-  min-height: 100vh;
+  height: 100%;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+
+/* Make sizing predictable */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Keep a sane dark base (Gateway provides its own background anyway) */
+body {
+  background: #0b1220;
+  color: rgba(255, 255, 255, 0.92);
 }
 
 a { color: inherit; text-decoration: none; }
-button, input { font: inherit; }
-
-/* ===== Global readability fix ===== */
-:root {
-  color-scheme: light !important;
+button, input, select, textarea { font: inherit; }
+.flex-row,
+.flex-wrap,
+[style*="display: flex"] {
+  max-width: 100%;
+}
+[style*="display: flex"] > * {
+  min-width: 0;
+}
+/* --- FLEX OVERFLOW SAFETY NET --- */
+.flex-row,
+.flex-wrap,
+[style*="display: flex"] {
+  max-width: 100%;
 }
 
-html, body, #root {
-  background: #f5f7fb;
-  color: #111827;
+[style*="display: flex"] > * {
+  min-width: 0;
+}
+/* 🔒 Prevent grid/flex children from forcing overflow */
+.grid,
+[style*="display: grid"] {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
-/* Make text readable inside cards/panels */
-* {
-  color: inherit;
+/* 🔒 Same rule for flex rows inside grids */
+.flex,
+[style*="display: flex"] {
+  min-width: 0;
+  max-width: 100%;
+}
+body {
+  overflow-y: auto;
+}
+html, body { overflow-y: auto !important; }
+body { min-height: 100vh; }
+html, body {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
 }
 
-/* Inputs/buttons: stop the dark theme look */
-input, select, textarea {
-  background: #ffffff !important;
-  color: #111827 !important;
-  border: 1px solid #d1d5db !important;
-}
-
-button {
-  color: #111827;
-}
-
-/* If you have cards, make them pop */
-.card, .panel, .box {
-  background: #ffffff;
-  color: #111827;
+#root {
+  overflow: visible !important;
+  min-height: 100vh;
 }

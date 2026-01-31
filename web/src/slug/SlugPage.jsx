@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 
+import PlayerTrends from "../components/PlayerTrends";
 import VerbalView from "./VerbalView";
 import VisualView from "./VisualView";
 import BehaviorLayers from "./BehaviorLayers";
@@ -17,7 +18,9 @@ function ModeButton({ active, onClick, children }) {
       style={{
         padding: "10px 12px",
         borderRadius: 12,
-        border: active ? "2px solid rgba(0,0,0,.45)" : "1px solid rgba(0,0,0,.14)",
+        border: active
+          ? "2px solid rgba(0,0,0,.45)"
+          : "1px solid rgba(0,0,0,.14)",
         background: active ? "white" : "rgba(0,0,0,.02)",
         cursor: "pointer",
         fontWeight: 800,
@@ -28,18 +31,36 @@ function ModeButton({ active, onClick, children }) {
   );
 }
 
+<div style={{ padding: 12, borderRadius: 12, background: "yellow", fontWeight: 900 }}>
+  DEBUG: SlugPage.jsx UPDATED ✅
+</div>
+
+
 export default function SlugPage() {
   const slug = useMemo(() => getSlugFromUrl(), []);
   const [mode, setMode] = useState("verbal");
 
   const { data, loading, error } = useSlugData(slug);
 
-  if (loading) return <div style={{ padding: 16, fontFamily: "system-ui" }}>Loading…</div>;
-  if (error) return <div style={{ padding: 16, fontFamily: "system-ui" }}>Error loading slug.</div>;
-  if (!data) return <div style={{ padding: 16, fontFamily: "system-ui" }}>No data.</div>;
+  if (loading)
+    return <div style={{ padding: 16, fontFamily: "system-ui" }}>Loading…</div>;
+  if (error)
+    return (
+      <div style={{ padding: 16, fontFamily: "system-ui" }}>
+        Error loading slug.
+      </div>
+    );
+  if (!data)
+    return <div style={{ padding: 16, fontFamily: "system-ui" }}>No data.</div>;
 
   return (
-    <div style={{ fontFamily: "system-ui", background: "#f6f7fb", minHeight: "100vh" }}>
+    <div
+      style={{
+        fontFamily: "system-ui",
+        background: "#f6f7fb",
+        minHeight: "100vh",
+      }}
+    >
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}>
         {/* Header */}
         <div
@@ -53,17 +74,25 @@ export default function SlugPage() {
         >
           <div>
             <div style={{ fontSize: 12, opacity: 0.65 }}>Slug</div>
-            <h1 style={{ margin: 0, fontSize: 32, letterSpacing: -0.6 }}>{slug}</h1>
+            <h1 style={{ margin: 0, fontSize: 32, letterSpacing: -0.6 }}>
+              {slug}
+            </h1>
             <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
               asOf: <code>{data.asOf}</code>
             </div>
           </div>
 
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <ModeButton active={mode === "verbal"} onClick={() => setMode("verbal")}>
+            <ModeButton
+              active={mode === "verbal"}
+              onClick={() => setMode("verbal")}
+            >
               Verbal
             </ModeButton>
-            <ModeButton active={mode === "visual"} onClick={() => setMode("visual")}>
+            <ModeButton
+              active={mode === "visual"}
+              onClick={() => setMode("visual")}
+            >
               Visual
             </ModeButton>
           </div>
@@ -90,9 +119,19 @@ export default function SlugPage() {
             }}
           >
             {mode === "verbal" ? (
-              <VerbalView narrative={data.narrative} />
+              <>
+                <VerbalView narrative={data.narrative} />
+                <div style={{ marginTop: 12 }}>
+                  <PlayerTrends />
+                </div>
+              </>
             ) : (
-              <VisualView narrative={data.narrative} />
+              <>
+                <VisualView narrative={data.narrative} />
+                <div style={{ marginTop: 12 }}>
+                  <PlayerTrends />
+                </div>
+              </>
             )}
           </div>
 
@@ -106,10 +145,17 @@ export default function SlugPage() {
               border: "1px solid rgba(0,0,0,.06)",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "baseline",
+              }}
+            >
               <h2 style={{ margin: 0, fontSize: 16 }}>Behavior</h2>
               <div style={{ fontSize: 12, opacity: 0.65 }}>
-                rule: <code>{data.behavior?.ruleVersion || "—"}</code>
+                rule:{" "}
+                <code>{data.behavior?.ruleVersion || "—"}</code>
               </div>
             </div>
 
@@ -121,7 +167,8 @@ export default function SlugPage() {
 
         {/* Footer note */}
         <div style={{ marginTop: 12, fontSize: 12, opacity: 0.7 }}>
-          Visual is a shell. We plug metrics + rules later without changing the contract.
+          Visual is a shell. We plug metrics + rules later without changing the
+          contract.
         </div>
       </div>
     </div>

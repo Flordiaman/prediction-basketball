@@ -6,8 +6,9 @@ function StatTile({ label, value }) {
       style={{
         padding: 12,
         borderRadius: 12,
-        border: "1px solid rgba(0,0,0,.10)",
-        background: "white",
+        border: "1px solid rgba(255,255,255,.12)",
+        background: "rgba(0,0,0,.18)",
+        color: "rgba(255,255,255,.92)",
       }}
     >
       <div style={{ fontSize: 12, opacity: 0.7 }}>{label}</div>
@@ -24,40 +25,37 @@ function PlaceholderChart() {
       style={{
         height: 280,
         borderRadius: 14,
-        border: "1px solid rgba(0,0,0,.10)",
-        background:
-          "linear-gradient(180deg, rgba(0,0,0,.03), rgba(0,0,0,.01))",
+        border: "1px solid rgba(255,255,255,.12)",
+        background: "rgba(0,0,0,.18)",
         position: "relative",
         overflow: "hidden",
+        color: "rgba(255,255,255,.92)",
       }}
     >
-      {/* fake grid */}
+      {/* subtle grid */}
       <div
         style={{
           position: "absolute",
           inset: 0,
           backgroundImage:
-            "linear-gradient(rgba(0,0,0,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,.06) 1px, transparent 1px)",
+            "linear-gradient(rgba(255,255,255,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.06) 1px, transparent 1px)",
           backgroundSize: "48px 48px",
-          opacity: 0.35,
+          opacity: 0.18,
           pointerEvents: "none",
         }}
       />
+
       {/* fake line */}
-      <svg
-        viewBox="0 0 1000 300"
-        preserveAspectRatio="none"
-        style={{ position: "absolute", inset: 0 }}
-      >
+      <svg viewBox="0 0 1000 300" preserveAspectRatio="none" style={{ position: "absolute", inset: 0 }}>
         <path
           d="M0,230 C100,210 160,250 250,220 C340,190 420,210 520,170 C610,130 700,160 780,120 C860,80 920,110 1000,70"
           fill="none"
-          stroke="rgba(0,0,0,.65)"
+          stroke="rgba(255,255,255,.75)"
           strokeWidth="4"
         />
         <path
           d="M0,230 C100,210 160,250 250,220 C340,190 420,210 520,170 C610,130 700,160 780,120 C860,80 920,110 1000,70 L1000,300 L0,300 Z"
-          fill="rgba(0,0,0,.08)"
+          fill="rgba(255,255,255,.06)"
         />
       </svg>
 
@@ -93,7 +91,6 @@ function PlaceholderChart() {
 }
 
 export default function VisualView({ narrative }) {
-  // narrative is optional; we use it for vibe only
   const tone = narrative?.tone || "neutral";
   const confidence = narrative?.confidence ?? 0;
 
@@ -121,8 +118,9 @@ export default function VisualView({ narrative }) {
         style={{
           padding: 12,
           borderRadius: 14,
-          border: "1px solid rgba(0,0,0,.10)",
-          background: "white",
+          border: "1px solid rgba(255,255,255,.12)",
+          background: "rgba(0,0,0,.18)",
+          color: "rgba(255,255,255,.92)",
           display: "flex",
           justifyContent: "space-between",
           gap: 12,
@@ -132,9 +130,7 @@ export default function VisualView({ narrative }) {
         <div style={{ fontSize: 12, opacity: 0.75 }}>
           Signals: <b>Price</b>, <b>Volume</b>, <b>News</b> (render-only)
         </div>
-        <div style={{ fontSize: 12, opacity: 0.75 }}>
-          Next: plug in time window + real series
-        </div>
+        <div style={{ fontSize: 12, opacity: 0.75 }}>Next: plug in time window + real series</div>
       </div>
     </section>
   );

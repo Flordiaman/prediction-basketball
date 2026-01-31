@@ -1,41 +1,151 @@
-import { useEffect, useMemo, useState } from "react";
+// web/src/components/PlayerSearch.jsx
+import React, { useEffect, useMemo, useState } from "react";
 
-export default function PlayerSearch({ onSelectPlayer }) {
+const styles = {
+  wrap: {
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 12,
+    padding: 12,
+    background: "rgba(255,255,255,0.03)",
+  },
+  titleRow: { display: "flex", alignItems: "baseline", gap: 10 },
+  title: { fontSize: 16, fontWeight: 700 },
+  hint: { fontSize: 12, opacity: 0.7 },
+  inputRow: { display: "flex", gap: 8, marginTop: 10 },
+  input: {
+    flex: 1,
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.15)",
+    background: "rgba(0,0,0,0.25)",
+    color: "inherit",
+    outline: "none",
+  },
+  btn: {
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.15)",
+    background: "rgba(255,255,255,0.06)",
+    color: "inherit",
+    cursor: "pointer",
+  },
+  meta: { marginTop: 8, fontSize: 12, opacity: 0.75 },
+  list: { marginTop: 10, display: "flex", flexDirection: "column", gap: 6 },
+  row: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "10px 10px",
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.04)",
+    cursor: "pointer",
+    userSelect: "none",
+  },
+  rowName: { fontWeight: 600 },
+  rowSub: { fontSize: 12, opacity: 0.7 },
+};
+
+function normalizeId(p) {
+  return (
+    p?.id ??
+    p?.person_id ??
+    p?.player_id ??
+    p?.playerId ??
+    p?.PLAYER_ID ??
+    null
+  );
+}
+
+function normalizeName(p) {
+  return p?.person_name ?? p?.full_name ?? p?.name ?? "";
+}
+
+export default function PlayerSearch({
+  onSelectPlayer,
+  onGamesLoaded,
+  fetchLastGames,
+}) {
   const [q, setQ] = useState("");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
-  const canSearch = useMemo(() => q.trim().length >= 2, [q]);
+  async function searchPlayers(term) {
+    const res = await fetch(
+      `/api/nba/db/players/search?q=${encodeURIComponent(term)}&limit=25`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) throw new Error(`Search failed: ${res.status}`);
+    return res.json(); // returns array
+  }
 
+  // Debounced search
   useEffect(() => {
+    const term = q.trim();
+    setErr("");
+
+    if (term.length < 2) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+
     const t = setTimeout(async () => {
-      const term = q.trim();
-      setErr("");
-
-      if (term.length < 2) {
-        setRows([]);
-        return;
-      }
-
-      setLoading(true);
       try {
-        const r = await fetch(
-          `/api/nba/db/players/search?q=${encodeURIComponent(term)}&limit=25`
-        );
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
+        const data = await searchPlayers(term);
+        if (cancelled) return;
+
         setRows(Array.isArray(data) ? data : []);
       } catch (e) {
+        if (cancelled) return;
+        setErr(e?.message || "Search failed");
         setRows([]);
-        setErr("Player search failed");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }, 250);
 
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [q]);
+
+  const uiMeta = useMemo(() => {
+    if (err) return <div style={styles.meta}>❌ {err}</div>;
+    if (loading) return <div style={styles.meta}>Searching…</div>;
+    if (q.trim().length >= 2) return <div style={styles.meta}>{rows.length} results</div>;
+    return <div style={styles.meta}>Type 2+ letters to search</div>;
+  }, [err, loading, rows.length, q]);
+
+  async function handleSelect(p) {
+    const id = normalizeId(p);
+    const name = normalizeName(p);
+
+    console.log("CLICK PLAYER RAW", p);
+
+    const selected = {
+      id,
+      person_id: p?.person_id ?? null,
+      person_name: name,
+      raw: p,
+    };
+
+    if (onSelectPlayer) onSelectPlayer(selected);
+
+    if (onGamesLoaded && id && typeof fetchLastGames === "function") {
+      try {
+        const games = await fetchLastGames(id);
+        onGamesLoaded(games);
+      } catch (e) {
+        console.warn("fetchLastGames failed", e);
+      }
+    }
+  }
 
   return (
     <div style={styles.wrap}>
@@ -46,60 +156,38 @@ export default function PlayerSearch({ onSelectPlayer }) {
 
       <div style={styles.inputRow}>
         <input
+          style={styles.input}
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="LeBron, Curry, Durant…"
-          style={styles.input}
+          placeholder="Search players"
         />
-        <button
-          type="button"
-          onClick={() => {
-            setQ("");
-            setRows([]);
-            setErr("");
-          }}
-          disabled={!q}
-          style={{
-            ...styles.clearBtn,
-            opacity: q ? 1 : 0.5,
-            cursor: q ? "pointer" : "not-allowed",
-          }}
-        >
+        <button style={styles.btn} onClick={() => setQ("")}>
           Clear
         </button>
       </div>
 
-      {loading && <div style={styles.meta}>Searching…</div>}
-      {!loading && err && <div style={styles.err}>{err}</div>}
-      {!loading && !err && canSearch && rows.length === 0 && (
-        <div style={styles.meta}>No matches.</div>
-      )}
+      {uiMeta}
 
       {rows.length > 0 && (
-        <div style={styles.results}>
+        <div style={styles.list}>
           {rows.map((p) => {
-            const name =
-              p.display_first_last || `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim();
+            const id = normalizeId(p);
+            const name = normalizeName(p);
+
             return (
-              <button
-                key={p.person_id}
-                type="button"
-                onClick={() => {
-                  setRows([]);
-                  setErr("");
-                  onSelectPlayer?.(p);
+              <div
+                key={String(id ?? `${p?.person_name ?? "unknown"}-${p?.team_id ?? "na"}`)}
+                style={styles.row}
+                onClick={() => handleSelect(p)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSelect(p);
                 }}
-                style={styles.rowBtn}
               >
-                <div style={styles.rowLeft}>
-                  <div style={styles.rowName}>{name}</div>
-                  <div style={styles.rowSub}>
-                    {p.team_abbreviation ? p.team_abbreviation : "—"}
-                    {p.person_id ? ` • ID ${p.person_id}` : ""}
-                  </div>
-                </div>
-                <div style={styles.rowRight}>View</div>
-              </button>
+                <div style={styles.rowName}>{name}</div>
+                <div style={styles.rowSub}>{id ? `#${id}` : ""}</div>
+              </div>
             );
           })}
         </div>
@@ -107,65 +195,3 @@ export default function PlayerSearch({ onSelectPlayer }) {
     </div>
   );
 }
-
-const styles = {
-  wrap: {
-    border: "1px solid #e5e7eb",
-    borderRadius: 12,
-    background: "#ffffff",
-    padding: 12,
-    marginBottom: 12,
-  },
-  titleRow: {
-    display: "flex",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    marginBottom: 8,
-  },
-  title: { fontSize: 14, fontWeight: 700, color: "#111827" },
-  hint: { fontSize: 12, color: "#6b7280" },
-
-  inputRow: { display: "flex", gap: 8 },
-  input: {
-    flex: 1,
-    padding: "10px 12px",
-    borderRadius: 10,
-    border: "1px solid #d1d5db",
-    background: "#ffffff",
-    color: "#111827",
-    outline: "none",
-  },
-  clearBtn: {
-    padding: "10px 12px",
-    borderRadius: 10,
-    border: "1px solid #d1d5db",
-    background: "#f9fafb",
-    color: "#111827",
-  },
-
-  meta: { marginTop: 8, fontSize: 12, color: "#6b7280" },
-  err: { marginTop: 8, fontSize: 12, color: "#b91c1c" },
-
-  results: {
-    marginTop: 10,
-    border: "1px solid #e5e7eb",
-    borderRadius: 10,
-    overflow: "hidden",
-  },
-  rowBtn: {
-    width: "100%",
-    textAlign: "left",
-    padding: 10,
-    border: "none",
-    borderBottom: "1px solid #f3f4f6",
-    background: "#ffffff",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    cursor: "pointer",
-  },
-  rowLeft: { display: "flex", flexDirection: "column", gap: 2 },
-  rowName: { fontSize: 14, fontWeight: 700, color: "#111827" },
-  rowSub: { fontSize: 12, color: "#6b7280" },
-  rowRight: { fontSize: 12, color: "#2563eb", fontWeight: 700 },
-};
